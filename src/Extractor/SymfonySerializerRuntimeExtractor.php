@@ -152,18 +152,9 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                                 $convertedDocType = $this->typeConverter->convertType($dt);
                                 $tsTypes[] = $convertedDocType;
 
-                                // Extract inner referenced class
-                                if (preg_match('/(?:array|collection|iterable)?<*(?:[^,>]+,\s*)?([^\s>\[\]{}]+)/i', $dt, $refMatches)) {
-                                    $candidateRef = trim($refMatches[1], '<>[]');
-                                    if (!class_exists($candidateRef)) {
-                                        $nsCandidate = $reflection->getNamespaceName() . '\\' . $candidateRef;
-                                        if (class_exists($nsCandidate)) {
-                                            $candidateRef = $nsCandidate;
-                                        }
-                                    }
-                                    if (class_exists($candidateRef) && !is_a($candidateRef, \DateTimeInterface::class, true)) {
-                                        $referencedClass = $candidateRef;
-                                    }
+                                $extractedRef = $this->extractReferencedClass($dt, $reflection->getNamespaceName());
+                                if ($extractedRef !== null) {
+                                    $referencedClass = $extractedRef;
                                 }
                             }
                         }
@@ -171,7 +162,49 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                 }
             }
 
-            // 3. Check Runtime Normalized Value Type
+            // 3. Check Reflection Property PHPDoc if not getter
+            if (empty($tsTypes) && $propertyCandidate !== null && $reflection->hasProperty($propertyCandidate)) {
+                $refProp = $reflection->getProperty($propertyCandidate);
+                $refType = $refProp->getType();
+                if ($refType !== null) {
+                    if ($refType->allowsNull()) {
+                        $isNullable = true;
+                    }
+                    if ($refType instanceof \ReflectionNamedType) {
+                        $tsTypes[] = $this->typeConverter->convertType($refType->getName());
+                        if (!$refType->isBuiltin()) {
+                            $colClass = $refType->getName();
+                            if (!is_a($colClass, \DateTimeInterface::class, true)) {
+                                $referencedClass = $colClass;
+                            }
+                        }
+                    }
+                }
+
+                $docComment = $refProp->getDocComment();
+                if ($docComment !== false) {
+                    $docTypeStr = $this->extractDocType($docComment, '@var');
+                    if ($docTypeStr !== null && $docTypeStr !== '') {
+                        $docTypes = explode('|', $docTypeStr);
+                        foreach ($docTypes as $dt) {
+                            $dt = trim($dt);
+                            if (strtolower($dt) === 'null') {
+                                $isNullable = true;
+                                continue;
+                            }
+                            $convertedDocType = $this->typeConverter->convertType($dt);
+                            $tsTypes[] = $convertedDocType;
+
+                            $extractedRef = $this->extractReferencedClass($dt, $reflection->getNamespaceName());
+                            if ($extractedRef !== null) {
+                                $referencedClass = $extractedRef;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Check Runtime Normalized Value Type
             if (empty($tsTypes) && $normalizedValue !== null) {
                 if (is_int($normalizedValue) || is_float($normalizedValue)) {
                     $tsTypes[] = 'number';
@@ -184,16 +217,12 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                 }
             }
 
-            if ($normalizedValue === null) {
-                $isNullable = true;
-            }
-
             $uniqueTsTypes = array_values(array_unique($tsTypes));
 
-            // Filter out redundant 'any[]' or 'any' if specific types exist
+            // Filter out redundant 'any[]', 'any', 'Collection' if specific types exist
             $hasSpecificType = false;
             foreach ($uniqueTsTypes as $t) {
-                if ($t !== 'any' && $t !== 'any[]') {
+                if ($t !== 'any' && $t !== 'any[]' && $t !== 'Collection') {
                     $hasSpecificType = true;
                     break;
                 }
@@ -223,6 +252,39 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
         }
 
         return $typeDefinition;
+    }
+
+    private function extractReferencedClass(string $typeStr, string $currentNamespace): ?string
+    {
+        $typeStr = trim(ltrim($typeStr, '\\'));
+
+        // Handle generic Collection<int, EntityB> or array<EntityB> or Collection<EntityB>
+        if (preg_match('/^(?:array|collection|iterable|doctrine\\\\common\\\\collections\\\\collection)<(?:[^,>]+,\s*)?\s*([^>]+)\s*>$/i', $typeStr, $matches)) {
+            return $this->extractReferencedClass($matches[1], $currentNamespace);
+        }
+
+        // Handle Type[]
+        if (preg_match('/^([^\s\[\]]+)\[\]$/i', $typeStr, $matches)) {
+            return $this->extractReferencedClass($matches[1], $currentNamespace);
+        }
+
+        $candidate = $typeStr;
+        if (in_array(strtolower($candidate), ['int', 'integer', 'float', 'double', 'string', 'bool', 'boolean', 'array', 'iterable', 'mixed', 'void', 'null', 'object', 'any'], true)) {
+            return null;
+        }
+
+        if (!class_exists($candidate)) {
+            $nsCandidate = $currentNamespace . '\\' . $candidate;
+            if (class_exists($nsCandidate)) {
+                $candidate = $nsCandidate;
+            }
+        }
+
+        if (class_exists($candidate) && !is_a($candidate, \DateTimeInterface::class, true)) {
+            return $candidate;
+        }
+
+        return null;
     }
 
     private function parseClassTypeAliases(\ReflectionClass $reflection): array
