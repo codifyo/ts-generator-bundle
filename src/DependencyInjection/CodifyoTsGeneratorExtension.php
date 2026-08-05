@@ -41,6 +41,7 @@ class CodifyoTsGeneratorExtension extends Extension
             new Reference('serializer'),
             new Reference('property_info'),
             new Reference(PhpToTypeScriptTypeConverter::class),
+            new Reference('serializer.mapping.class_metadata_factory'),
         ]);
         $container->setDefinition(SymfonySerializerRuntimeExtractor::class, $runtimeExtractorDef);
 

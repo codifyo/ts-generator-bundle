@@ -2,11 +2,13 @@
 
 namespace Codifyo\TsGeneratorBundle\Extractor;
 
+use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
 use Codifyo\TsGeneratorBundle\Converter\TypeConverterInterface;
 use Codifyo\TsGeneratorBundle\Model\PropertyDefinition;
 use Codifyo\TsGeneratorBundle\Model\TypeConfig;
 use Codifyo\TsGeneratorBundle\Model\TypeDefinition;
 use Symfony\Component\PropertyInfo\PropertyInfoExtractorInterface;
+use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactoryInterface;
 use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 
 class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
@@ -14,7 +16,8 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
     public function __construct(
         private ?NormalizerInterface $normalizer,
         private ?PropertyInfoExtractorInterface $propertyInfoExtractor,
-        private TypeConverterInterface $typeConverter
+        private TypeConverterInterface $typeConverter,
+        private ?ClassMetadataFactoryInterface $classMetadataFactory = null
     ) {
     }
 
@@ -24,7 +27,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
         $targetGroups = $typeConfig->getGroups();
         $typeDefinition = new TypeDefinition($typeConfig->getName(), $className, [], [], $typeConfig->getKind());
 
-        if (!class_exists($className) || $this->normalizer === null) {
+        if (!class_exists($className)) {
             return $typeDefinition;
         }
 
@@ -34,19 +37,42 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
         }
 
         $reflection = new \ReflectionClass($className);
-        try {
-            $instance = $reflection->newInstanceWithoutConstructor();
-        } catch (\Throwable) {
-            return $typeDefinition;
+        $typeAliases = $this->parseClassTypeAliases($reflection);
+        if ($this->typeConverter instanceof PhpToTypeScriptTypeConverter) {
+            $this->typeConverter->setTypeAliases($typeAliases);
         }
 
-        try {
-            $normalized = $this->normalizer->normalize($instance, null, $context);
-        } catch (\Throwable) {
-            return $typeDefinition;
+        $normalized = [];
+
+        // 1. Try Runtime Normalization if normalizer is available
+        if ($this->normalizer !== null) {
+            try {
+                $instance = $reflection->newInstanceWithoutConstructor();
+                $normRes = $this->normalizer->normalize($instance, null, $context);
+                if (is_array($normRes)) {
+                    $normalized = $normRes;
+                }
+            } catch (\Throwable) {
+                // Fallback
+            }
         }
 
-        if (!is_array($normalized)) {
+        // 2. Combine attributes from ClassMetadataFactory (for custom getters with #[Groups] without properties)
+        if ($this->classMetadataFactory !== null && $this->classMetadataFactory->hasMetadataFor($className)) {
+            $classMetadata = $this->classMetadataFactory->getMetadataFor($className);
+            foreach ($classMetadata->getAttributesMetadata() as $attrMeta) {
+                $propGroups = $attrMeta->getGroups();
+                if (!empty($targetGroups) && empty(array_intersect($targetGroups, $propGroups))) {
+                    continue;
+                }
+                $serializedName = $attrMeta->getSerializedName() ?? $attrMeta->getName();
+                if (!array_key_exists($serializedName, $normalized)) {
+                    $normalized[$serializedName] = null;
+                }
+            }
+        }
+
+        if (empty($normalized)) {
             return $typeDefinition;
         }
 
@@ -55,7 +81,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
             $isNullable = false;
             $referencedClass = null;
 
-            $propertyCandidate = $this->resolvePropertyName($reflection, $serializedName);
+            $propertyCandidate = $this->resolvePropertyName($reflection, (string)$serializedName);
 
             // 0. Check Doctrine ORM Relation Attributes (ManyToMany, OneToMany, ManyToOne, OneToOne)
             if ($propertyCandidate !== null && $reflection->hasProperty($propertyCandidate)) {
@@ -93,7 +119,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
 
             // 2. Check Dynamic Getter / Reflection Return Type / PHPDoc
             if (empty($tsTypes)) {
-                $getterMethod = $this->resolveGetterMethod($reflection, $serializedName);
+                $getterMethod = $this->resolveGetterMethod($reflection, (string)$serializedName);
                 if ($getterMethod !== null) {
                     $returnType = $getterMethod->getReturnType();
                     if ($returnType !== null) {
@@ -113,29 +139,31 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
 
                     // Check PHPDoc @return
                     $docComment = $getterMethod->getDocComment();
-                    if ($docComment !== false && preg_match('/@return\s+([^\s]+)/', $docComment, $matches)) {
-                        $docTypeStr = trim($matches[1]);
-                        $docTypes = explode('|', $docTypeStr);
-                        foreach ($docTypes as $dt) {
-                            $dt = trim($dt);
-                            if (strtolower($dt) === 'null') {
-                                $isNullable = true;
-                                continue;
-                            }
-                            $convertedDocType = $this->typeConverter->convertType($dt);
-                            $tsTypes[] = $convertedDocType;
-
-                            // Extract inner referenced class if array<Class> or Collection<Class> or Class[]
-                            if (preg_match('/(?:array|collection|iterable)?<*(?:[^,>]+,\s*)?([^\s>\[\]]+)/i', $dt, $refMatches)) {
-                                $candidateRef = trim($refMatches[1], '<>[]');
-                                if (!class_exists($candidateRef)) {
-                                    $nsCandidate = $reflection->getNamespaceName() . '\\' . $candidateRef;
-                                    if (class_exists($nsCandidate)) {
-                                        $candidateRef = $nsCandidate;
-                                    }
+                    if ($docComment !== false) {
+                        $docTypeStr = $this->extractDocType($docComment, '@return');
+                        if ($docTypeStr !== null && $docTypeStr !== '') {
+                            $docTypes = explode('|', $docTypeStr);
+                            foreach ($docTypes as $dt) {
+                                $dt = trim($dt);
+                                if (strtolower($dt) === 'null') {
+                                    $isNullable = true;
+                                    continue;
                                 }
-                                if (class_exists($candidateRef) && !is_a($candidateRef, \DateTimeInterface::class, true)) {
-                                    $referencedClass = $candidateRef;
+                                $convertedDocType = $this->typeConverter->convertType($dt);
+                                $tsTypes[] = $convertedDocType;
+
+                                // Extract inner referenced class
+                                if (preg_match('/(?:array|collection|iterable)?<*(?:[^,>]+,\s*)?([^\s>\[\]{}]+)/i', $dt, $refMatches)) {
+                                    $candidateRef = trim($refMatches[1], '<>[]');
+                                    if (!class_exists($candidateRef)) {
+                                        $nsCandidate = $reflection->getNamespaceName() . '\\' . $candidateRef;
+                                        if (class_exists($nsCandidate)) {
+                                            $candidateRef = $nsCandidate;
+                                        }
+                                    }
+                                    if (class_exists($candidateRef) && !is_a($candidateRef, \DateTimeInterface::class, true)) {
+                                        $referencedClass = $candidateRef;
+                                    }
                                 }
                             }
                         }
@@ -162,7 +190,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
 
             $uniqueTsTypes = array_values(array_unique($tsTypes));
 
-            // If we have specific typed arrays like Array<DummyTag>, filter out redundant 'any[]' or 'any'
+            // Filter out redundant 'any[]' or 'any' if specific types exist
             $hasSpecificType = false;
             foreach ($uniqueTsTypes as $t) {
                 if ($t !== 'any' && $t !== 'any[]') {
@@ -172,7 +200,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
             }
 
             if ($hasSpecificType) {
-                $uniqueTsTypes = array_values(array_filter($uniqueTsTypes, fn($t) => $t !== 'any' && $t !== 'any[]'));
+                $uniqueTsTypes = array_values(array_filter($uniqueTsTypes, fn($t) => $t !== 'any' && $t !== 'any[]' && $t !== 'Collection'));
             }
 
             $finalTsType = !empty($uniqueTsTypes) ? implode(' | ', $uniqueTsTypes) : 'any';
@@ -195,6 +223,36 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
         }
 
         return $typeDefinition;
+    }
+
+    private function parseClassTypeAliases(\ReflectionClass $reflection): array
+    {
+        $aliases = [];
+        $doc = $reflection->getDocComment();
+        if ($doc !== false) {
+            if (preg_match_all('/@(?:phpstan|psalm)-type\s+([A-Za-z0-9_]+)\s*=?\s*(.+?)(?:\s+\*\/|\s*[\r\n]|$)/m', $doc, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $match) {
+                    $aliasName = trim($match[1]);
+                    $definition = trim($match[2]);
+                    $aliases[$aliasName] = $definition;
+                }
+            }
+        }
+
+        return $aliases;
+    }
+
+    private function extractDocType(string $docComment, string $tag): ?string
+    {
+        if (preg_match('/' . preg_quote($tag, '/') . '\s+(.+?)(?:\s+\$|\s+\*\/|\s*[\r\n]|$)/m', $docComment, $matches)) {
+            $raw = trim($matches[1]);
+            if (preg_match('/^([^\s<>{}]*(?:<[^>]+>|\{[^}]+\}|\[\])*)/i', $raw, $m)) {
+                return trim($m[1]);
+            }
+            return $raw;
+        }
+
+        return null;
     }
 
     private function resolvePropertyName(\ReflectionClass $reflection, string $serializedName): ?string
