@@ -4,6 +4,7 @@ namespace Codifyo\TsGeneratorBundle\Extractor;
 
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
 use Codifyo\TsGeneratorBundle\Converter\TypeConverterInterface;
+use Codifyo\TsGeneratorBundle\Helper\ClassResolver;
 use Codifyo\TsGeneratorBundle\Model\PropertyDefinition;
 use Codifyo\TsGeneratorBundle\Model\TypeConfig;
 use Codifyo\TsGeneratorBundle\Model\TypeDefinition;
@@ -31,20 +32,35 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
             return $typeDefinition;
         }
 
-        $context = [];
-        if (!empty($targetGroups)) {
-            $context['groups'] = $targetGroups;
-        }
-
         $reflection = new \ReflectionClass($className);
         $typeAliases = $this->parseClassTypeAliases($reflection);
         if ($this->typeConverter instanceof PhpToTypeScriptTypeConverter) {
             $this->typeConverter->setTypeAliases($typeAliases);
         }
 
+        $definition = $this->doExtract($typeConfig, $reflection, $targetGroups);
+
+        // Fallback: If targetGroups resulted in 0 properties, try extracting without groups filter (all properties)
+        if (empty($definition->getProperties()) && !empty($targetGroups)) {
+            $definition = $this->doExtract($typeConfig, $reflection, []);
+        }
+
+        return $definition;
+    }
+
+    private function doExtract(TypeConfig $typeConfig, \ReflectionClass $reflection, array $targetGroups): TypeDefinition
+    {
+        $className = $typeConfig->getClass();
+        $typeDefinition = new TypeDefinition($typeConfig->getName(), $className, [], [], $typeConfig->getKind());
+
+        $context = [];
+        if (!empty($targetGroups)) {
+            $context['groups'] = $targetGroups;
+        }
+
         $normalized = [];
 
-        // 1. Try Runtime Normalization if normalizer is available
+        // 1. Try Runtime Normalization
         if ($this->normalizer !== null) {
             try {
                 $instance = $reflection->newInstanceWithoutConstructor();
@@ -57,7 +73,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
             }
         }
 
-        // 2. Combine attributes from ClassMetadataFactory (for custom getters with #[Groups] without properties)
+        // 2. Combine attributes from ClassMetadataFactory (for custom getters with #[Groups])
         if ($this->classMetadataFactory !== null && $this->classMetadataFactory->hasMetadataFor($className)) {
             $classMetadata = $this->classMetadataFactory->getMetadataFor($className);
             foreach ($classMetadata->getAttributesMetadata() as $attrMeta) {
@@ -83,7 +99,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
 
             $propertyCandidate = $this->resolvePropertyName($reflection, (string)$serializedName);
 
-            // 0. Check Doctrine ORM Relation Attributes (ManyToMany, OneToMany, ManyToOne, OneToOne)
+            // 0. Check Doctrine ORM Relation Attributes
             if ($propertyCandidate !== null && $reflection->hasProperty($propertyCandidate)) {
                 $refProp = $reflection->getProperty($propertyCandidate);
                 $doctrineRel = $this->resolveDoctrineRelation($refProp);
@@ -104,12 +120,12 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                         $tsTypes[] = $this->typeConverter->convertType($type);
                         $objClassName = $type->getClassName();
                         if ($objClassName !== null && !is_a($objClassName, \DateTimeInterface::class, true)) {
-                            $referencedClass = $objClassName;
+                            $referencedClass = ClassResolver::resolveFqcn($objClassName, $reflection);
                         } elseif ($type->isCollection()) {
                             foreach ($type->getCollectionValueTypes() as $valType) {
                                 $colClass = $valType->getClassName();
                                 if ($colClass !== null && !is_a($colClass, \DateTimeInterface::class, true)) {
-                                    $referencedClass = $colClass;
+                                    $referencedClass = ClassResolver::resolveFqcn($colClass, $reflection);
                                 }
                             }
                         }
@@ -131,7 +147,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                             if (!$returnType->isBuiltin()) {
                                 $classRef = $returnType->getName();
                                 if (!is_a($classRef, \DateTimeInterface::class, true)) {
-                                    $referencedClass = $classRef;
+                                    $referencedClass = ClassResolver::resolveFqcn($classRef, $reflection);
                                 }
                             }
                         }
@@ -152,7 +168,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                                 $convertedDocType = $this->typeConverter->convertType($dt);
                                 $tsTypes[] = $convertedDocType;
 
-                                $extractedRef = $this->extractReferencedClass($dt, $reflection->getNamespaceName());
+                                $extractedRef = $this->extractReferencedClass($dt, $reflection);
                                 if ($extractedRef !== null) {
                                     $referencedClass = $extractedRef;
                                 }
@@ -175,7 +191,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                         if (!$refType->isBuiltin()) {
                             $colClass = $refType->getName();
                             if (!is_a($colClass, \DateTimeInterface::class, true)) {
-                                $referencedClass = $colClass;
+                                $referencedClass = ClassResolver::resolveFqcn($colClass, $reflection);
                             }
                         }
                     }
@@ -195,7 +211,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                             $convertedDocType = $this->typeConverter->convertType($dt);
                             $tsTypes[] = $convertedDocType;
 
-                            $extractedRef = $this->extractReferencedClass($dt, $reflection->getNamespaceName());
+                            $extractedRef = $this->extractReferencedClass($dt, $reflection);
                             if ($extractedRef !== null) {
                                 $referencedClass = $extractedRef;
                             }
@@ -254,18 +270,16 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
         return $typeDefinition;
     }
 
-    private function extractReferencedClass(string $typeStr, string $currentNamespace): ?string
+    private function extractReferencedClass(string $typeStr, \ReflectionClass $reflection): ?string
     {
         $typeStr = trim(ltrim($typeStr, '\\'));
 
-        // Handle generic Collection<int, EntityB> or array<EntityB> or Collection<EntityB>
         if (preg_match('/^(?:array|collection|iterable|doctrine\\\\common\\\\collections\\\\collection)<(?:[^,>]+,\s*)?\s*([^>]+)\s*>$/i', $typeStr, $matches)) {
-            return $this->extractReferencedClass($matches[1], $currentNamespace);
+            return $this->extractReferencedClass($matches[1], $reflection);
         }
 
-        // Handle Type[]
         if (preg_match('/^([^\s\[\]]+)\[\]$/i', $typeStr, $matches)) {
-            return $this->extractReferencedClass($matches[1], $currentNamespace);
+            return $this->extractReferencedClass($matches[1], $reflection);
         }
 
         $candidate = $typeStr;
@@ -273,18 +287,7 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
             return null;
         }
 
-        if (!class_exists($candidate)) {
-            $nsCandidate = $currentNamespace . '\\' . $candidate;
-            if (class_exists($nsCandidate)) {
-                $candidate = $nsCandidate;
-            }
-        }
-
-        if (class_exists($candidate) && !is_a($candidate, \DateTimeInterface::class, true)) {
-            return $candidate;
-        }
-
-        return null;
+        return ClassResolver::resolveFqcn($candidate, $reflection);
     }
 
     private function parseClassTypeAliases(\ReflectionClass $reflection): array
@@ -358,21 +361,27 @@ class SymfonySerializerRuntimeExtractor implements MetadataExtractorInterface
                 $args = $attribute->getArguments();
                 $targetEntity = $args['targetEntity'] ?? $args[0] ?? null;
                 if ($targetEntity !== null) {
-                    $shortName = $this->typeConverter->getShortClassName($targetEntity);
-                    return [
-                        'tsType' => sprintf('Array<%s>', $shortName),
-                        'targetEntity' => $targetEntity,
-                    ];
+                    $fqcnTarget = ClassResolver::resolveFqcn($targetEntity, $property->getDeclaringClass());
+                    if ($fqcnTarget !== null) {
+                        $shortName = $this->typeConverter->getShortClassName($fqcnTarget);
+                        return [
+                            'tsType' => sprintf('Array<%s>', $shortName),
+                            'targetEntity' => $fqcnTarget,
+                        ];
+                    }
                 }
             } elseif (str_contains($attrName, 'ManyToOne') || str_contains($attrName, 'OneToOne')) {
                 $args = $attribute->getArguments();
                 $targetEntity = $args['targetEntity'] ?? $args[0] ?? null;
                 if ($targetEntity !== null) {
-                    $shortName = $this->typeConverter->getShortClassName($targetEntity);
-                    return [
-                        'tsType' => $shortName,
-                        'targetEntity' => $targetEntity,
-                    ];
+                    $fqcnTarget = ClassResolver::resolveFqcn($targetEntity, $property->getDeclaringClass());
+                    if ($fqcnTarget !== null) {
+                        $shortName = $this->typeConverter->getShortClassName($fqcnTarget);
+                        return [
+                            'tsType' => $shortName,
+                            'targetEntity' => $fqcnTarget,
+                        ];
+                    }
                 }
             }
         }

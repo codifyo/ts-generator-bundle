@@ -4,6 +4,7 @@ namespace Codifyo\TsGeneratorBundle\Extractor;
 
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
 use Codifyo\TsGeneratorBundle\Converter\TypeConverterInterface;
+use Codifyo\TsGeneratorBundle\Helper\ClassResolver;
 use Codifyo\TsGeneratorBundle\Model\PropertyDefinition;
 use Codifyo\TsGeneratorBundle\Model\TypeConfig;
 use Codifyo\TsGeneratorBundle\Model\TypeDefinition;
@@ -36,6 +37,20 @@ class SymfonySerializerMetadataExtractor implements MetadataExtractorInterface
             $this->typeConverter->setTypeAliases($typeAliases);
         }
 
+        $definition = $this->doExtract($typeConfig, $reflection, $targetGroups);
+
+        if (empty($definition->getProperties()) && !empty($targetGroups)) {
+            $definition = $this->doExtract($typeConfig, $reflection, []);
+        }
+
+        return $definition;
+    }
+
+    private function doExtract(TypeConfig $typeConfig, \ReflectionClass $reflection, array $targetGroups): TypeDefinition
+    {
+        $className = $typeConfig->getClass();
+        $typeDefinition = new TypeDefinition($typeConfig->getName(), $className, [], [], $typeConfig->getKind());
+
         $propertiesToProcess = $this->getAttributesToProcess($className, $targetGroups);
 
         foreach ($propertiesToProcess as $propertyName => $serializedName) {
@@ -55,12 +70,12 @@ class SymfonySerializerMetadataExtractor implements MetadataExtractorInterface
 
                     $objClassName = $type->getClassName();
                     if ($objClassName !== null && !is_a($objClassName, \DateTimeInterface::class, true)) {
-                        $referencedClass = $objClassName;
+                        $referencedClass = ClassResolver::resolveFqcn($objClassName, $reflection);
                     } elseif ($type->isCollection()) {
                         foreach ($type->getCollectionValueTypes() as $valType) {
                             $colClass = $valType->getClassName();
                             if ($colClass !== null && !is_a($colClass, \DateTimeInterface::class, true)) {
-                                $referencedClass = $colClass;
+                                $referencedClass = ClassResolver::resolveFqcn($colClass, $reflection);
                             }
                         }
                     }
@@ -81,7 +96,7 @@ class SymfonySerializerMetadataExtractor implements MetadataExtractorInterface
                             if (!$refType->isBuiltin()) {
                                 $colClass = $refType->getName();
                                 if (!is_a($colClass, \DateTimeInterface::class, true)) {
-                                    $referencedClass = $colClass;
+                                    $referencedClass = ClassResolver::resolveFqcn($colClass, $reflection);
                                 }
                             }
                         }
@@ -102,17 +117,9 @@ class SymfonySerializerMetadataExtractor implements MetadataExtractorInterface
                                 $convertedDocType = $this->typeConverter->convertType($dt);
                                 $tsTypes[] = $convertedDocType;
 
-                                if (preg_match('/(?:array|collection|iterable)?<*(?:[^,>]+,\s*)?([^\s>\[\]{}]+)/i', $dt, $refMatches)) {
-                                    $candidateRef = trim($refMatches[1], '<>[]');
-                                    if (!class_exists($candidateRef)) {
-                                        $nsCandidate = $reflection->getNamespaceName() . '\\' . $candidateRef;
-                                        if (class_exists($nsCandidate)) {
-                                            $candidateRef = $nsCandidate;
-                                        }
-                                    }
-                                    if (class_exists($candidateRef) && !is_a($candidateRef, \DateTimeInterface::class, true)) {
-                                        $referencedClass = $candidateRef;
-                                    }
+                                $extractedRef = $this->extractReferencedClass($dt, $reflection);
+                                if ($extractedRef !== null) {
+                                    $referencedClass = $extractedRef;
                                 }
                             }
                         }
@@ -130,7 +137,7 @@ class SymfonySerializerMetadataExtractor implements MetadataExtractorInterface
                             if (!$returnType->isBuiltin()) {
                                 $colClass = $returnType->getName();
                                 if (!is_a($colClass, \DateTimeInterface::class, true)) {
-                                    $referencedClass = $colClass;
+                                    $referencedClass = ClassResolver::resolveFqcn($colClass, $reflection);
                                 }
                             }
                         }
@@ -151,17 +158,9 @@ class SymfonySerializerMetadataExtractor implements MetadataExtractorInterface
                                 $convertedDocType = $this->typeConverter->convertType($dt);
                                 $tsTypes[] = $convertedDocType;
 
-                                if (preg_match('/(?:array|collection|iterable)?<*(?:[^,>]+,\s*)?([^\s>\[\]{}]+)/i', $dt, $refMatches)) {
-                                    $candidateRef = trim($refMatches[1], '<>[]');
-                                    if (!class_exists($candidateRef)) {
-                                        $nsCandidate = $reflection->getNamespaceName() . '\\' . $candidateRef;
-                                        if (class_exists($nsCandidate)) {
-                                            $candidateRef = $nsCandidate;
-                                        }
-                                    }
-                                    if (class_exists($candidateRef) && !is_a($candidateRef, \DateTimeInterface::class, true)) {
-                                        $referencedClass = $candidateRef;
-                                    }
+                                $extractedRef = $this->extractReferencedClass($dt, $reflection);
+                                if ($extractedRef !== null) {
+                                    $referencedClass = $extractedRef;
                                 }
                             }
                         }
@@ -171,10 +170,10 @@ class SymfonySerializerMetadataExtractor implements MetadataExtractorInterface
 
             $uniqueTsTypes = array_values(array_unique($tsTypes));
 
-            // Filter out redundant 'any[]' or 'any' if specific types exist
+            // Filter out redundant 'any[]', 'any', 'Collection' if specific types exist
             $hasSpecificType = false;
             foreach ($uniqueTsTypes as $t) {
-                if ($t !== 'any' && $t !== 'any[]') {
+                if ($t !== 'any' && $t !== 'any[]' && $t !== 'Collection') {
                     $hasSpecificType = true;
                     break;
                 }
@@ -204,6 +203,26 @@ class SymfonySerializerMetadataExtractor implements MetadataExtractorInterface
         }
 
         return $typeDefinition;
+    }
+
+    private function extractReferencedClass(string $typeStr, \ReflectionClass $reflection): ?string
+    {
+        $typeStr = trim(ltrim($typeStr, '\\'));
+
+        if (preg_match('/^(?:array|collection|iterable|doctrine\\\\common\\\\collections\\\\collection)<(?:[^,>]+,\s*)?\s*([^>]+)\s*>$/i', $typeStr, $matches)) {
+            return $this->extractReferencedClass($matches[1], $reflection);
+        }
+
+        if (preg_match('/^([^\s\[\]]+)\[\]$/i', $typeStr, $matches)) {
+            return $this->extractReferencedClass($matches[1], $reflection);
+        }
+
+        $candidate = $typeStr;
+        if (in_array(strtolower($candidate), ['int', 'integer', 'float', 'double', 'string', 'bool', 'boolean', 'array', 'iterable', 'mixed', 'void', 'null', 'object', 'any'], true)) {
+            return null;
+        }
+
+        return ClassResolver::resolveFqcn($candidate, $reflection);
     }
 
     private function parseClassTypeAliases(\ReflectionClass $reflection): array
