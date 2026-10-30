@@ -328,11 +328,10 @@ abstract class AbstractSerializerMetadataExtractor implements MetadataExtractorI
         $specific = array_values(array_filter($types, static fn (string $t) => !\in_array($t, self::GENERIC_TS_TYPES, true)));
 
         if ($specific !== []) {
-            $types = $specific;
-        } else {
-            $types = array_values(array_filter($types, static fn (string $t) => $t !== 'null' && $t !== 'Collection'));
+            return implode(' | ', $specific);
         }
 
-        return $types === [] ? 'any' : implode(' | ', $types);
+        // Only vague types: an untyped collection is still known to be an array
+        return array_intersect($types, ['any[]', 'Collection']) !== [] ? 'any[]' : 'any';
     }
 }

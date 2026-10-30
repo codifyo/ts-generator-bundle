@@ -23,7 +23,7 @@ use Symfony\Component\TypeInfo\TypeIdentifier;
  */
 final class PhpToTypeScriptTypeConverter implements TypeConverterInterface
 {
-    private const COLLECTION_PATTERN = '/^(?:array|list|non-empty-array|non-empty-list|collection|iterable|doctrine\\\\common\\\\collections\\\\collection)<(?:[a-z\-]+\s*,\s*)?(.+)>$/i';
+    private const ITERABLE_KEYWORDS = ['array', 'list', 'non-empty-array', 'non-empty-list', 'iterable'];
 
     public function convertType(Type|string|null $type, array $typeAliases = []): string
     {
@@ -77,8 +77,8 @@ final class PhpToTypeScriptTypeConverter implements TypeConverterInterface
             return \sprintf('Array<%s>', $this->convertStringPhpType($matches[1], $typeAliases));
         }
 
-        if (preg_match(self::COLLECTION_PATTERN, $phpType, $matches)) {
-            return \sprintf('Array<%s>', $this->convertStringPhpType($matches[1], $typeAliases));
+        if (preg_match('/^([\w\\\\-]+)<(.+)>$/s', $phpType, $matches)) {
+            return $this->convertGeneric($matches[1], $this->splitTopLevel($matches[2], ','), $typeAliases);
         }
 
         if (enum_exists($phpType)) {
@@ -194,6 +194,39 @@ final class PhpToTypeScriptTypeConverter implements TypeConverterInterface
         }
 
         return 'any';
+    }
+
+    /**
+     * "array<int, Tag>", "Collection<int, Tag>", "ArrayCollection<Tag>"... become arrays of their value type,
+     * "array<string, int>" a string-keyed record; any other generic class keeps its own name.
+     *
+     * @param list<string>          $params
+     * @param array<string, string> $typeAliases
+     */
+    private function convertGeneric(string $base, array $params, array $typeAliases): string
+    {
+        $base = ltrim($base, '\\');
+        $lowerBase = strtolower($base);
+
+        if ($lowerBase === 'class-string') {
+            return 'string';
+        }
+
+        $isIterable = \in_array($lowerBase, self::ITERABLE_KEYWORDS, true)
+            || str_ends_with($lowerBase, 'collection')
+            || ((class_exists($base) || interface_exists($base)) && is_a($base, \Traversable::class, true));
+
+        if (!$isIterable || $params === []) {
+            return $this->getShortClassName($base);
+        }
+
+        $valueType = $this->convertStringPhpType(end($params), $typeAliases);
+
+        if (\count($params) === 2 && \in_array(strtolower(trim($params[0])), ['string', 'non-empty-string'], true)) {
+            return \sprintf('Record<string, %s>', $valueType);
+        }
+
+        return \sprintf('Array<%s>', $valueType);
     }
 
     /**

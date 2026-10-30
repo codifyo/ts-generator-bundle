@@ -1,100 +1,74 @@
-# Codifyo TypeScript Generator Bundle (`ts-generator-bundle`)
+# Codifyo TypeScript Generator Bundle
 
-Bundle Symfony 7.3+ & 8 permettant de générer automatiquement des fichiers de définitions TypeScript (`.ts`) à partir du **Symfony Serializer**, des **Custom Normalizers**, des **groupes de sérialisation** et de **JMS Serializer**.
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
----
+Bundle Symfony qui génère les définitions TypeScript (`.ts`) de vos entités et DTO à partir de ce que le **Symfony Serializer** expose réellement : groupes de sérialisation, noms sérialisés, custom normalizers, relations Doctrine et, en option, **JMS Serializer**.
 
-## 🚀 Fonctionnalités
-
-- **Multi-Projets & Multi-Répertoires** : Configurez plusieurs projets cibles avec des dossiers de sortie distants (ex: `assets/ts/types`, `public/ts/types`).
-- **Filtrage par Groupes de Sérialisation** : Génération exacte des propriétés exposées par vos attributs `#[Groups(['user:read'])]`.
-- **Formats d'Export Configurables** : Choisissez de générer des `interface` (par défaut), des `class` ou des `type` TypeScript via l'option `kind`.
-- **Modes d'Extraction Flexibles (`mode`)** :
-  - `runtime` : Exécute la véritable chaîne de normalisation (`$serializer->normalize()`) pour capturer le résultat exact des **Custom Normalizers**, des **`NameConverter`** et des **accesseurs dynamiques / getters calculés**.
-    > ⚠️ L'objet est instancié **sans son constructeur** et vos getters / normalizers sont réellement exécutés. Si un normalizer a des effets de bord (requête SQL, appel HTTP…), utilisez le mode `static` pour ce type. Les échecs de normalisation sont journalisés (service `logger`), puis le bundle se replie sur les métadonnées.
-  - `static` : Analyse statique via `ClassMetadataFactory` et la réflexion PHP.
-  - `jms` : Support des métadonnées `JMS\Serializer`.
-  - `auto` *(par défaut)* : Teste d'abord le mode `runtime`, puis bascule automatiquement en `static` / `jms` en cas de fallback.
-- **Support des Relations Doctrine ORM** :
-  - Interprétation automatique des relations `OneToMany` et `ManyToMany` en `Array<Target>`.
-  - Interprétation des `ManyToOne` et `OneToOne` en `Target`, rendu nullable (`target?: Target | null`) sauf si le type PHP est non nullable ou si `#[JoinColumn(nullable: false)]` est déclaré.
-  - Détection du typage générique PHPDoc `@var Collection<int, Target>` ou `@var Target[]`.
-- **Dépendances & Imports Automatiques** :
-  - Génération d'imports relatifs (`import { Role } from './Role';`).
-  - Option **`auto_generate_deps: true`** pour découvrir et générer automatiquement toutes les entités référencées.
-  - Sans `auto_generate_deps`, les classes référencées sont décrites **inline**, récursivement (`author: { id: number; role?: { id: number; name: string } | null }`).
-- **Groupes stricts** : si aucune propriété ne correspond aux groupes demandés, le type généré est vide (comme la sortie du serializer). Le bundle n'expose jamais les propriétés d'autres groupes.
-- **Détection des collisions** : deux classes produisant le même nom TypeScript (ex. `App\Entity\Tag` et `App\Blog\Tag`) provoquent une erreur explicite. Déclarez l'une d'elles avec l'option `name`.
+Le front consomme ainsi des types toujours alignés sur l'API, sans les écrire à la main.
 
 ---
 
-## 📦 Installation
+## Fonctionnalités
 
-Installez le bundle via Composer :
+- **Groupes de sérialisation** : seules les propriétés des groupes demandés (`#[Groups(['user:read'])]`) sont générées, jamais les autres.
+- **Plusieurs projets** : chaque projet a son dossier de sortie (`assets/ts/types`, `public/ts/types`…) et sa liste de types.
+- **`interface`, `class` ou `type`** au choix, par type (option `kind`).
+- **Quatre modes d'extraction** : `runtime` (vrai `normalize()`, custom normalizers compris), `static` (métadonnées, sans exécuter de code), `jms` et `auto`. Voir [Modes d'extraction](docs/extraction-modes.md).
+- **Typage riche** : génériques PHPDoc (`Collection<int, Tag>`, `array<Tag>`, `Tag[]`), array shapes, alias `@phpstan-type`, enums, dates, unions. Voir [Correspondance des types](docs/type-mapping.md).
+- **Relations Doctrine** : `OneToMany` / `ManyToMany` en `Array<Target>`, `ManyToOne` / `OneToOne` nullables selon le `JoinColumn`.
+- **Références entre types** : imports relatifs, génération automatique des dépendances (`auto_generate_deps`) ou description inline récursive. Voir [Références et imports](docs/references-and-imports.md).
+
+## Compatibilité
+
+- **PHP** : 8.2 et supérieur (8.4+ pour Symfony 8).
+- **Symfony** : 7.3, 7.4 et 8.x.
+- **Optionnel** : `doctrine/orm` (relations), `jms/serializer-bundle` (mode `jms`), `phpstan/phpdoc-parser` (génériques PHPDoc résolus par PropertyInfo).
+
+## Installation
 
 ```bash
-composer require codifyo/ts-generator-bundle
+composer require --dev codifyo/ts-generator-bundle
 ```
 
-Si Symfony Flex n'enregistre pas le bundle automatiquement, ajoutez-le dans `config/bundles.php` :
+Si Symfony Flex n'enregistre pas le bundle, ajoutez-le dans `config/bundles.php` :
 
 ```php
 return [
     // ...
-    Codifyo\TsGeneratorBundle\CodifyoTsGeneratorBundle::class => ['all' => true],
+    Codifyo\TsGeneratorBundle\CodifyoTsGeneratorBundle::class => ['dev' => true],
 ];
 ```
 
----
+Le bundle s'appuie sur les services `serializer` et `property_info` de FrameworkBundle : le serializer doit être activé (`framework.serializer.enabled: true`, activé par défaut avec `symfony/serializer`).
 
-## ⚙️ Configuration
+## Démarrage rapide
 
-Créez le fichier de configuration `config/packages/codifyo_ts_generator.yaml` :
+`config/packages/dev/codifyo_ts_generator.yaml` :
 
 ```yaml
 codifyo_ts_generator:
     projects:
         frontend:
             dir: 'assets/ts/types'
-            mode: 'auto' # 'auto' | 'runtime' | 'static' | 'jms' (optionnel, défaut: 'auto')
             types:
                 - class: 'App\Entity\User'
                   groups: ['user:read']
-                  kind: 'interface' # 'interface' | 'class' | 'type' (optionnel, défaut: 'interface')
-                  auto_generate_deps: true # Découvre et génère automatiquement les entités liées (ex: Role)
-
-                - class: 'App\Entity\Product'
-                  groups: ['product:read', 'product:detail']
-                  name: 'ProductDTO' # Nom du type TS personnalisé (optionnel)
-                  mode: 'runtime' # Surchargé spécifiquement pour ce type
+                  auto_generate_deps: true
 ```
-
----
-
-## 💻 Utilisation
-
-Exécutez la commande console Symfony pour générer les fichiers TypeScript :
 
 ```bash
-# Générer tous les projets configurés
 php bin/console codifyo:ts-generator:generate
-
-# Générer uniquement un projet spécifique
-php bin/console codifyo:ts-generator:generate --project=frontend
-# ou version courte
-php bin/console codifyo:ts-generator:generate -p frontend
 ```
 
----
+Toutes les options sont décrites dans [Configuration](docs/configuration.md).
 
-## 📄 Exemple de Rendu
-
-### Entité PHP (`App\Entity\User.php`)
+## Exemple
 
 ```php
 namespace App\Entity;
 
 use Doctrine\Common\Collections\Collection;
+use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Serializer\Attribute\Groups;
 
 class User
@@ -108,10 +82,14 @@ class User
     #[Groups(['user:read'])]
     private ?string $email = null;
 
+    #[Groups(['admin'])]
+    private string $password;
+
     /**
      * @var Collection<int, Role>
      */
     #[Groups(['user:read'])]
+    #[ORM\ManyToMany(targetEntity: Role::class)]
     private Collection $roles;
 
     #[Groups(['user:read'])]
@@ -122,7 +100,7 @@ class User
 }
 ```
 
-### Fichier TypeScript Généré (`assets/ts/types/User.ts`)
+`assets/ts/types/User.ts` :
 
 ```typescript
 /* tslint:disable */
@@ -140,9 +118,16 @@ export interface User {
 }
 ```
 
----
+`password` (groupe `admin`) n'apparaît pas, et `Role.ts` est généré à côté grâce à `auto_generate_deps`.
 
-## 🧪 Tests
+## Documentation
+
+- [Configuration](docs/configuration.md) : référence complète des options et de la commande.
+- [Modes d'extraction](docs/extraction-modes.md) : `auto`, `runtime`, `static`, `jms` et l'ordre de résolution des types.
+- [Correspondance des types](docs/type-mapping.md) : règles de conversion PHP → TypeScript, nullabilité, Doctrine.
+- [Références et imports](docs/references-and-imports.md) : dépendances générées, types inline, collisions de noms.
+- [Dépannage](docs/troubleshooting.md) : erreurs fréquentes et leurs solutions.
+## Développement
 
 ```bash
 composer test     # PHPUnit
@@ -152,8 +137,6 @@ composer cs       # vérification du style (PHP-CS-Fixer) ; composer cs-fix pour
 
 La CI GitHub Actions exécute ces vérifications sur Symfony 7.3 (dépendances minimales), 7.4, 8.0 et 8.x.
 
----
-
-## 📜 Licence
+## Licence
 
 Ce bundle est distribué sous la licence [MIT](LICENSE).

@@ -33,7 +33,12 @@ class PhpToTypeScriptTypeConverterTest extends TestCase
     public function testConvertStringGenericsUnionsAndShapes(): void
     {
         $this->assertEquals('Array<Tag>', $this->converter->convertType('Collection<int, App\Tag>'));
-        $this->assertEquals('Array<Array<Tag>>', $this->converter->convertType('array<int, array<string, Tag>>'));
+        $this->assertEquals('Array<Record<string, Tag>>', $this->converter->convertType('array<int, array<string, Tag>>'));
+        $this->assertEquals('Array<Tag>', $this->converter->convertType('ArrayCollection<int, App\Tag>'));
+        $this->assertEquals('Array<Tag>', $this->converter->convertType('iterable<Tag>'));
+        $this->assertEquals('Record<string, number>', $this->converter->convertType('array<string, int>'));
+        $this->assertEquals('string', $this->converter->convertType('class-string<Tag>'));
+        $this->assertEquals('Paginator', $this->converter->convertType('App\Paginator<Tag>'));
         $this->assertEquals('Array<{ id: number; name?: string }>', $this->converter->convertType('array<array{id: int, name?: string}>'));
         $this->assertEquals('string | number', $this->converter->convertType('string|int|null'));
         $this->assertEquals('Tag', $this->converter->convertType('?Tag'));
