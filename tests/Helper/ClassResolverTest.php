@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Helper;
 
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
@@ -7,7 +9,6 @@ use Codifyo\TsGeneratorBundle\Extractor\SymfonySerializerRuntimeExtractor;
 use Codifyo\TsGeneratorBundle\Generator\TypeScriptGenerator;
 use Codifyo\TsGeneratorBundle\Helper\ClassResolver;
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyEntityWithUseImport;
-
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\SubNamespace\DummyImportedEntity;
 use Codifyo\TsGeneratorBundle\Writer\FileWriter;
 use PHPUnit\Framework\TestCase;
@@ -74,6 +75,6 @@ class ClassResolverTest extends TestCase
 
         $mainContent = file_get_contents($this->tempDir . '/DummyEntityWithUseImport.ts');
         $this->assertStringContainsString("import { DummyImportedEntity } from './DummyImportedEntity';", $mainContent);
-        $this->assertStringContainsString("importedItems: Array<DummyImportedEntity>;", $mainContent);
+        $this->assertStringContainsString('importedItems: Array<DummyImportedEntity>;', $mainContent);
     }
 }

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Fixtures;
 
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\SubNamespace\DummyImportedEntity;

@@ -1,11 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\DependencyInjection;
 
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
 
-class Configuration implements ConfigurationInterface
+final class Configuration implements ConfigurationInterface
 {
     public function getConfigTreeBuilder(): TreeBuilder
     {
@@ -14,12 +16,12 @@ class Configuration implements ConfigurationInterface
 
         $rootNode
             ->beforeNormalization()
-                ->always(function ($v) {
-                    if (!is_array($v)) {
+                ->always(static function ($v) {
+                    if (!\is_array($v)) {
                         return $v;
                     }
 
-                    $projects = isset($v['projects']) && is_array($v['projects']) ? $v['projects'] : $v;
+                    $projects = isset($v['projects']) && \is_array($v['projects']) ? $v['projects'] : $v;
                     $normalizedProjects = [];
 
                     foreach ($projects as $projectName => $projectData) {
@@ -27,10 +29,10 @@ class Configuration implements ConfigurationInterface
                             continue;
                         }
 
-                        if (is_array($projectData) && array_is_list($projectData)) {
+                        if (\is_array($projectData) && array_is_list($projectData)) {
                             $merged = [];
                             foreach ($projectData as $item) {
-                                if (is_array($item)) {
+                                if (\is_array($item)) {
                                     $merged = array_merge($merged, $item);
                                 }
                             }

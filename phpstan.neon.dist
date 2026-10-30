@@ -1,0 +1,10 @@
+parameters:
+    level: 6
+    paths:
+        - src
+        - tests
+    excludePaths:
+        analyse:
+            # Fixtures are data-holder classes read through reflection only
+            - tests/Fixtures
+    treatPhpDocTypesAsCertain: false

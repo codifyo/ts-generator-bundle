@@ -1,0 +1,51 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+jobs:
+    tests:
+        name: PHP ${{ matrix.php }} / Symfony ${{ matrix.symfony }}${{ matrix.deps == 'lowest' && ' (lowest)' || '' }}
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - { php: '8.2', symfony: '7.3.*', deps: 'lowest' }
+                    - { php: '8.3', symfony: '7.4.*', deps: 'highest' }
+                    - { php: '8.4', symfony: '8.0.*', deps: 'highest' }
+                    - { php: '8.5', symfony: '8.*', deps: 'highest' }
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ matrix.php }}
+                  tools: flex
+                  coverage: none
+
+            - uses: ramsey/composer-install@v3
+              env:
+                  SYMFONY_REQUIRE: ${{ matrix.symfony }}
+              with:
+                  dependency-versions: ${{ matrix.deps }}
+
+            - run: vendor/bin/phpunit
+
+    quality:
+        name: PHPStan & coding standards
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.4'
+                  coverage: none
+
+            - uses: ramsey/composer-install@v3
+
+            - run: composer phpstan
+            - run: composer cs

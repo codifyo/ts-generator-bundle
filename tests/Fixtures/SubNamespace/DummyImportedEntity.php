@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Fixtures\SubNamespace;
 
 use Symfony\Component\Serializer\Attribute\Groups;

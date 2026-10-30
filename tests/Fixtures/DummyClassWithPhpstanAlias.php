@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Fixtures;
 
 use Doctrine\Common\Collections\Collection;
@@ -11,7 +13,7 @@ use Symfony\Component\Serializer\Attribute\Groups;
 class DummyClassWithPhpstanAlias
 {
     /**
-     * Custom getter returning Collection<int, DummyTag>
+     * Custom getter returning Collection<int, DummyTag>.
      *
      * @return Collection<int, DummyTag>
      */
@@ -22,7 +24,7 @@ class DummyClassWithPhpstanAlias
     }
 
     /**
-     * Custom getter returning array<ClassB>
+     * Custom getter returning array<ClassB>.
      *
      * @return array<ClassB>
      */

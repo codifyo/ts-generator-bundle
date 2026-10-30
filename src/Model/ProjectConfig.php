@@ -1,8 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Model;
 
-class ProjectConfig
+final class ProjectConfig
 {
     /**
      * @param TypeConfig[] $types
@@ -11,7 +13,7 @@ class ProjectConfig
         private string $name,
         private string $dir,
         private array $types = [],
-        private string $mode = 'auto'
+        private string $mode = 'auto',
     ) {
     }
 
@@ -37,6 +39,6 @@ class ProjectConfig
     {
         $normalized = strtolower($this->mode);
 
-        return in_array($normalized, ['auto', 'runtime', 'static', 'jms'], true) ? $normalized : 'auto';
+        return \in_array($normalized, ['auto', 'runtime', 'static', 'jms'], true) ? $normalized : 'auto';
     }
 }

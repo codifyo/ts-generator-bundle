@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Generator;
 
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
@@ -50,7 +52,7 @@ class TypeScriptGeneratorTest extends TestCase
         $this->assertArrayHasKey('projet1', $results);
         $this->assertCount(2, $results['projet1']);
 
-        $userTsFile = $this->tempDir . DIRECTORY_SEPARATOR . 'DummyUser.ts';
+        $userTsFile = $this->tempDir . \DIRECTORY_SEPARATOR . 'DummyUser.ts';
         $userContent = file_get_contents($userTsFile);
 
         $this->assertStringContainsString('export interface DummyUser {', $userContent);
@@ -77,7 +79,7 @@ class TypeScriptGeneratorTest extends TestCase
         $generator = new TypeScriptGenerator($extractor, $fileWriter, $projectsConfig);
         $results = $generator->generate('projet1');
 
-        $userTsFile = $this->tempDir . DIRECTORY_SEPARATOR . 'DummyUser.ts';
+        $userTsFile = $this->tempDir . \DIRECTORY_SEPARATOR . 'DummyUser.ts';
         $userContent = file_get_contents($userTsFile);
 
         $this->assertStringContainsString('export class DummyUser {', $userContent);
@@ -102,7 +104,7 @@ class TypeScriptGeneratorTest extends TestCase
         $generator = new TypeScriptGenerator($extractor, $fileWriter, $projectsConfig);
         $results = $generator->generate('projet1');
 
-        $roleTsFile = $this->tempDir . DIRECTORY_SEPARATOR . 'DummyRole.ts';
+        $roleTsFile = $this->tempDir . \DIRECTORY_SEPARATOR . 'DummyRole.ts';
         $this->assertFileExists($roleTsFile);
         $roleContent = file_get_contents($roleTsFile);
         $this->assertStringContainsString('export interface DummyRole {', $roleContent);

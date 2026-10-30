@@ -1,17 +1,19 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Extractor;
 
 use Codifyo\TsGeneratorBundle\Model\TypeConfig;
 use Codifyo\TsGeneratorBundle\Model\TypeDefinition;
 
-class ChainMetadataExtractor implements MetadataExtractorInterface
+final class ChainMetadataExtractor implements MetadataExtractorInterface
 {
     /**
      * @param array<string, MetadataExtractorInterface> $extractors Map of modeKey => ExtractorInstance
      */
     public function __construct(
-        private array $extractors = []
+        private array $extractors = [],
     ) {
     }
 

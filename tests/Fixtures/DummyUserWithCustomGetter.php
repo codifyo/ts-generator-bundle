@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Fixtures;
 
 use Symfony\Component\Serializer\Attribute\Groups;
@@ -31,9 +33,7 @@ class DummyUserWithCustomGetter
     }
 
     /**
-     * Custom dynamic getter
-     *
-     * @return string
+     * Custom dynamic getter.
      */
     #[Groups(['serializer_group'])]
     public function getFullName(): string

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Extractor;
 
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
@@ -24,7 +26,7 @@ class SymfonySerializerMetadataExtractorTest extends TestCase
         $props = $definition->getProperties();
         $this->assertCount(4, $props);
 
-        $propNames = array_map(fn($p) => $p->getName(), $props);
+        $propNames = array_map(static fn ($p) => $p->getName(), $props);
         $this->assertContains('id', $propNames);
         $this->assertContains('username', $propNames);
         $this->assertContains('email', $propNames);

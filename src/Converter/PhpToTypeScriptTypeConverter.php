@@ -1,104 +1,235 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Converter;
 
-use Symfony\Component\PropertyInfo\Type;
+use Symfony\Component\TypeInfo\Type;
+use Symfony\Component\TypeInfo\Type\ArrayShapeType;
+use Symfony\Component\TypeInfo\Type\BuiltinType;
+use Symfony\Component\TypeInfo\Type\CollectionType;
+use Symfony\Component\TypeInfo\Type\EnumType;
+use Symfony\Component\TypeInfo\Type\GenericType;
+use Symfony\Component\TypeInfo\Type\IntersectionType;
+use Symfony\Component\TypeInfo\Type\NullableType;
+use Symfony\Component\TypeInfo\Type\ObjectType;
+use Symfony\Component\TypeInfo\Type\TemplateType;
+use Symfony\Component\TypeInfo\Type\UnionType;
+use Symfony\Component\TypeInfo\TypeIdentifier;
 
-class PhpToTypeScriptTypeConverter implements TypeConverterInterface
+/**
+ * Stateless converter: type aliases are passed with each call so that a shared
+ * service instance never leaks aliases from one class into another.
+ */
+final class PhpToTypeScriptTypeConverter implements TypeConverterInterface
 {
-    /**
-     * @param array<string, string> $typeAliases Map of AliasName => Definition (e.g. 'ClassB' => 'array{id: int}')
-     */
-    public function __construct(
-        private array $typeAliases = []
-    ) {
-    }
+    private const COLLECTION_PATTERN = '/^(?:array|list|non-empty-array|non-empty-list|collection|iterable|doctrine\\\\common\\\\collections\\\\collection)<(?:[a-z\-]+\s*,\s*)?(.+)>$/i';
 
-    public function setTypeAliases(array $typeAliases): void
-    {
-        $this->typeAliases = $typeAliases;
-    }
-
-    public function convertType(mixed $type): string
+    public function convertType(Type|string|null $type, array $typeAliases = []): string
     {
         if ($type === null) {
             return 'any';
         }
 
-        if (is_string($type)) {
-            return $this->convertStringPhpType($type);
+        if (\is_string($type)) {
+            return $this->convertStringPhpType($type, $typeAliases);
         }
 
-        if ($type instanceof Type) {
-            return $this->convertPropertyInfoType($type);
+        return $this->convertTypeInfo($type);
+    }
+
+    /**
+     * @param array<string, string> $typeAliases
+     */
+    public function convertStringPhpType(string $phpType, array $typeAliases = []): string
+    {
+        $phpType = trim(ltrim(trim($phpType), '\\'));
+
+        if (isset($typeAliases[$phpType])) {
+            $definition = $typeAliases[$phpType];
+            unset($typeAliases[$phpType]); // guards against self-referencing aliases
+
+            return $this->convertStringPhpType($definition, $typeAliases);
+        }
+
+        if (preg_match('/^\?(.+)$/', $phpType, $matches)) {
+            return $this->convertStringPhpType($matches[1], $typeAliases);
+        }
+
+        $unionParts = $this->splitTopLevel($phpType, '|');
+        if (\count($unionParts) > 1) {
+            $converted = [];
+            foreach ($unionParts as $part) {
+                if (strtolower(trim($part)) === 'null') {
+                    continue;
+                }
+                $converted[] = $this->convertStringPhpType($part, $typeAliases);
+            }
+
+            return $converted === [] ? 'null' : implode(' | ', array_unique($converted));
+        }
+
+        if (preg_match('/^(?:array)?\{(.*)\}$/is', $phpType, $matches)) {
+            return $this->convertArrayShape($matches[1], $typeAliases);
+        }
+
+        if (preg_match('/^(.+)\[\]$/', $phpType, $matches)) {
+            return \sprintf('Array<%s>', $this->convertStringPhpType($matches[1], $typeAliases));
+        }
+
+        if (preg_match(self::COLLECTION_PATTERN, $phpType, $matches)) {
+            return \sprintf('Array<%s>', $this->convertStringPhpType($matches[1], $typeAliases));
+        }
+
+        if (enum_exists($phpType)) {
+            return $this->convertEnum($phpType);
+        }
+
+        return match (strtolower($phpType)) {
+            'int', 'integer', 'positive-int', 'negative-int', 'non-negative-int', 'float', 'double' => 'number',
+            'string', 'non-empty-string', 'class-string' => 'string',
+            'bool', 'boolean', 'true', 'false' => 'boolean',
+            'datetime', 'datetimeimmutable', 'datetimeinterface' => 'string',
+            'array', 'list', 'iterable' => 'any[]',
+            'object' => 'Record<string, any>',
+            'null' => 'null',
+            'mixed' => 'any',
+            'void' => 'void',
+            'never' => 'never',
+            default => $this->getShortClassName($phpType),
+        };
+    }
+
+    public function getShortClassName(string $fqcn): string
+    {
+        $parts = explode('\\', $fqcn);
+
+        return end($parts);
+    }
+
+    private function convertTypeInfo(Type $type): string
+    {
+        if ($type instanceof NullableType) {
+            return $this->convertTypeInfo($type->getWrappedType());
+        }
+
+        if ($type instanceof UnionType) {
+            $parts = [];
+            foreach ($type->getTypes() as $subType) {
+                if ($subType instanceof BuiltinType && $subType->getTypeIdentifier() === TypeIdentifier::NULL) {
+                    continue;
+                }
+                $parts[] = $this->convertTypeInfo($subType);
+            }
+
+            return $parts === [] ? 'null' : implode(' | ', array_unique($parts));
+        }
+
+        if ($type instanceof IntersectionType) {
+            return implode(' & ', array_unique(array_map(fn (Type $t) => $this->convertTypeInfo($t), $type->getTypes())));
+        }
+
+        if ($type instanceof ArrayShapeType) {
+            $fields = [];
+            foreach ($type->getShape() as $key => $field) {
+                $fields[] = \sprintf('%s%s: %s', $key, $field['optional'] ? '?' : '', $this->convertTypeInfo($field['type']));
+            }
+
+            return $fields === [] ? 'Record<string, any>' : '{ ' . implode('; ', $fields) . ' }';
+        }
+
+        if ($type instanceof CollectionType) {
+            $valueType = $this->convertTypeInfo($type->getCollectionValueType());
+            $keyType = $type->getCollectionKeyType();
+
+            if (!$type->isList() && $keyType instanceof BuiltinType && $keyType->getTypeIdentifier() === TypeIdentifier::STRING) {
+                return \sprintf('Record<string, %s>', $valueType);
+            }
+
+            return $valueType === 'any' ? 'any[]' : \sprintf('Array<%s>', $valueType);
+        }
+
+        if ($type instanceof GenericType) {
+            $wrapped = $type->getWrappedType();
+            $variableTypes = $type->getVariableTypes();
+            if ($wrapped instanceof ObjectType && is_a($wrapped->getClassName(), \Traversable::class, true) && $variableTypes !== []) {
+                return \sprintf('Array<%s>', $this->convertTypeInfo(end($variableTypes)));
+            }
+
+            return $this->convertTypeInfo($wrapped);
+        }
+
+        if ($type instanceof TemplateType) {
+            return $this->convertTypeInfo($type->getBound());
+        }
+
+        if ($type instanceof EnumType) {
+            return $this->convertEnum($type->getClassName());
+        }
+
+        if ($type instanceof ObjectType) {
+            $class = $type->getClassName();
+            if (is_a($class, \DateTimeInterface::class, true)) {
+                return 'string';
+            }
+            if (is_a($class, \Traversable::class, true)) {
+                return 'any[]';
+            }
+
+            return $this->getShortClassName($class);
+        }
+
+        if ($type instanceof BuiltinType) {
+            return match ($type->getTypeIdentifier()) {
+                TypeIdentifier::INT, TypeIdentifier::FLOAT => 'number',
+                TypeIdentifier::STRING => 'string',
+                TypeIdentifier::BOOL, TypeIdentifier::TRUE, TypeIdentifier::FALSE => 'boolean',
+                TypeIdentifier::ARRAY, TypeIdentifier::ITERABLE => 'any[]',
+                TypeIdentifier::OBJECT => 'Record<string, any>',
+                TypeIdentifier::NULL => 'null',
+                TypeIdentifier::VOID => 'void',
+                TypeIdentifier::NEVER => 'never',
+                default => 'any',
+            };
         }
 
         return 'any';
     }
 
-    public function convertStringPhpType(string $phpType): string
+    /**
+     * Backed enums serialize to their backing value; pure enums are rendered as a string.
+     */
+    private function convertEnum(string $enumClass): string
     {
-        $phpType = trim(ltrim($phpType, '\\'));
-
-        // Check if phpType matches a known PHPStan / Psalm type alias
-        if (isset($this->typeAliases[$phpType])) {
-            return $this->convertStringPhpType($this->typeAliases[$phpType]);
+        if (!is_subclass_of($enumClass, \BackedEnum::class)) {
+            return 'string';
         }
 
-        // Handle Array Shapes: array{id: int, name?: string} or {id: int, name: string}
-        if (preg_match('/^(?:array)?\{(.+)\}$/is', $phpType, $matches)) {
-            return $this->convertArrayShape($matches[1]);
-        }
+        $backingType = (new \ReflectionEnum($enumClass))->getBackingType();
 
-        // Handle Type[] syntax
-        if (preg_match('/^([^\s\[\]]+)\[\]$/i', $phpType, $matches)) {
-            $inner = $this->convertStringPhpType($matches[1]);
-            return sprintf('Array<%s>', $inner);
-        }
-
-        // Handle array<Type> or Collection<Type> or Collection<Key, Type> syntax (allowing spaces inside <...>)
-        if (preg_match('/^(?:array|collection|iterable|doctrine\\\\common\\\\collections\\\\collection)<(?:[^,>]+,\s*)?\s*([^>]+)\s*>$/i', $phpType, $matches)) {
-            $inner = $this->convertStringPhpType($matches[1]);
-            return sprintf('Array<%s>', $inner);
-        }
-
-        return match (strtolower($phpType)) {
-            'int', 'integer', 'float', 'double' => 'number',
-            'string' => 'string',
-            'bool', 'boolean' => 'boolean',
-            'datetime', 'datetimeimmutable', 'datetimeinterface' => 'string',
-            'array', 'iterable' => 'any[]',
-            'mixed' => 'any',
-            'void' => 'void',
-            default => $this->getShortClassName($phpType),
-        };
+        return $backingType !== null && $backingType->getName() === 'int' ? 'number' : 'string';
     }
 
-    private function convertArrayShape(string $shapeContent): string
+    /**
+     * @param array<string, string> $typeAliases
+     */
+    private function convertArrayShape(string $shapeContent, array $typeAliases): string
     {
         $fields = [];
-        $tokens = $this->splitShapeFields($shapeContent);
 
-        foreach ($tokens as $token) {
+        foreach ($this->splitTopLevel($shapeContent, ',') as $token) {
             $token = trim($token);
-            if (empty($token)) {
+            if ($token === '' || $token === '...') {
                 continue;
             }
 
-            if (preg_match('/^([a-zA-Z0-9_\-]+)(\\??)\\s*:\\s*(.+)$/s', $token, $matches)) {
-                $fieldName = $matches[1];
-                $isOptional = $matches[2] === '?';
-                $fieldType = $this->convertStringPhpType(trim($matches[3]));
-
-                if ($isOptional) {
-                    $fields[] = sprintf('%s?: %s', $fieldName, $fieldType);
-                } else {
-                    $fields[] = sprintf('%s: %s', $fieldName, $fieldType);
-                }
+            if (preg_match('/^([a-zA-Z0-9_\-]+)(\??)\s*:\s*(.+)$/s', $token, $matches)) {
+                $fieldType = $this->convertStringPhpType(trim($matches[3]), $typeAliases);
+                $fields[] = \sprintf('%s%s: %s', $matches[1], $matches[2] === '?' ? '?' : '', $fieldType);
             }
         }
 
-        if (empty($fields)) {
+        if ($fields === []) {
             return 'Record<string, any>';
         }
 
@@ -106,87 +237,35 @@ class PhpToTypeScriptTypeConverter implements TypeConverterInterface
     }
 
     /**
+     * Splits $content on $separator, ignoring separators nested in <>, {} or ().
+     *
      * @return string[]
      */
-    private function splitShapeFields(string $content): array
+    private function splitTopLevel(string $content, string $separator): array
     {
-        $fields = [];
+        $parts = [];
         $depth = 0;
         $current = '';
+        $length = \strlen($content);
 
-        for ($i = 0; $i < strlen($content); $i++) {
+        for ($i = 0; $i < $length; ++$i) {
             $char = $content[$i];
             if ($char === '{' || $char === '<' || $char === '(') {
-                $depth++;
-                $current .= $char;
+                ++$depth;
             } elseif ($char === '}' || $char === '>' || $char === ')') {
-                $depth--;
-                $current .= $char;
-            } elseif ($char === ',' && $depth === 0) {
-                $fields[] = $current;
+                --$depth;
+            } elseif ($char === $separator && $depth === 0) {
+                $parts[] = $current;
                 $current = '';
-            } else {
-                $current .= $char;
+                continue;
             }
+            $current .= $char;
         }
 
         if (trim($current) !== '') {
-            $fields[] = $current;
+            $parts[] = $current;
         }
 
-        return $fields;
-    }
-
-    private function convertPropertyInfoType(Type $type): string
-    {
-        $builtinType = $type->getBuiltinType();
-
-        if ($type->isCollection()) {
-            $valueTypes = $type->getCollectionValueTypes();
-            if (!empty($valueTypes)) {
-                $subType = $this->convertPropertyInfoType($valueTypes[0]);
-                return sprintf('Array<%s>', $subType);
-            }
-            return 'any[]';
-        }
-
-        switch ($builtinType) {
-            case Type::BUILTIN_TYPE_INT:
-            case Type::BUILTIN_TYPE_FLOAT:
-                return 'number';
-
-            case Type::BUILTIN_TYPE_STRING:
-                return 'string';
-
-            case Type::BUILTIN_TYPE_BOOL:
-                return 'boolean';
-
-            case Type::BUILTIN_TYPE_ARRAY:
-            case Type::BUILTIN_TYPE_ITERABLE:
-                return 'any[]';
-
-            case Type::BUILTIN_TYPE_OBJECT:
-                $class = $type->getClassName();
-                if ($class === null) {
-                    return 'Record<string, any>';
-                }
-                if (is_a($class, \DateTimeInterface::class, true)) {
-                    return 'string';
-                }
-                return $this->getShortClassName($class);
-
-            case Type::BUILTIN_TYPE_RESOURCE:
-            case Type::BUILTIN_TYPE_CALLABLE:
-                return 'any';
-
-            default:
-                return 'any';
-        }
-    }
-
-    public function getShortClassName(string $fqcn): string
-    {
-        $parts = explode('\\', $fqcn);
-        return end($parts);
+        return $parts;
     }
 }

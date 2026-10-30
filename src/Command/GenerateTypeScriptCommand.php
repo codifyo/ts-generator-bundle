@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Command;
 
 use Codifyo\TsGeneratorBundle\Generator\TypeScriptGeneratorInterface;
@@ -14,10 +16,10 @@ use Symfony\Component\Console\Style\SymfonyStyle;
     name: 'codifyo:ts-generator:generate',
     description: 'Generates TypeScript definition files from Symfony Serializer metadata.'
 )]
-class GenerateTypeScriptCommand extends Command
+final class GenerateTypeScriptCommand extends Command
 {
     public function __construct(
-        private TypeScriptGeneratorInterface $generator
+        private TypeScriptGeneratorInterface $generator,
     ) {
         parent::__construct();
     }
@@ -25,7 +27,7 @@ class GenerateTypeScriptCommand extends Command
     protected function configure(): void
     {
         $this
-            ->addOption('project', 'p', InputOption::VALUE_OPTIONAL, 'Target project name to generate (if omitted, all projects are generated)')
+            ->addOption('project', 'p', InputOption::VALUE_REQUIRED, 'Target project name to generate (if omitted, all projects are generated)')
         ;
     }
 
@@ -38,24 +40,27 @@ class GenerateTypeScriptCommand extends Command
 
         try {
             $results = $this->generator->generate($projectName);
-
-            $totalFiles = 0;
-            foreach ($results as $projName => $files) {
-                $io->section(sprintf('Project: %s', $projName));
-                foreach ($files as $file) {
-                    $io->writeln(sprintf('  <info>[Generated]</info> %s', $file));
-                    $totalFiles++;
-                }
+        } catch (\Throwable $e) {
+            $io->error(\sprintf('Error generating TypeScript definitions: %s', $e->getMessage()));
+            if ($output->isVerbose()) {
+                $io->writeln($e->getTraceAsString());
             }
-
-            $io->newLine();
-            $io->success(sprintf('Successfully generated %d TypeScript definition file(s).', $totalFiles));
-
-            return Command::SUCCESS;
-        } catch (\Exception $e) {
-            $io->error(sprintf('Error generating TypeScript definitions: %s', $e->getMessage()));
 
             return Command::FAILURE;
         }
+
+        $totalFiles = 0;
+        foreach ($results as $projName => $files) {
+            $io->section(\sprintf('Project: %s', $projName));
+            foreach ($files as $file) {
+                $io->writeln(\sprintf('  <info>[Generated]</info> %s', $file));
+                ++$totalFiles;
+            }
+        }
+
+        $io->newLine();
+        $io->success(\sprintf('Successfully generated %d TypeScript definition file(s).', $totalFiles));
+
+        return Command::SUCCESS;
     }
 }

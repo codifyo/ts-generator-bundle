@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Extractor;
 
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
@@ -20,7 +22,7 @@ class SymfonySerializerRuntimeExtractorTest extends TestCase
     {
         $classMetadataFactory = new ClassMetadataFactory(new AttributeLoader());
         $reflectionExtractor = new ReflectionExtractor();
-        $propertyInfo = new PropertyInfoExtractor([$reflectionExtractor], [$reflectionExtractor], [$reflectionExtractor], [$reflectionExtractor]);
+        $propertyInfo = new PropertyInfoExtractor([$reflectionExtractor], [$reflectionExtractor], [], [$reflectionExtractor]);
 
         $normalizer = new ObjectNormalizer($classMetadataFactory, null, null, $propertyInfo);
         $serializer = new Serializer([$normalizer]);
@@ -34,7 +36,7 @@ class SymfonySerializerRuntimeExtractorTest extends TestCase
         $this->assertEquals('DummyUserWithCustomGetter', $definition->getName());
         $props = $definition->getProperties();
 
-        $propNames = array_map(fn($p) => $p->getName(), $props);
+        $propNames = array_map(static fn ($p) => $p->getName(), $props);
         $this->assertContains('id', $propNames);
         $this->assertContains('firstName', $propNames);
         $this->assertContains('lastName', $propNames);

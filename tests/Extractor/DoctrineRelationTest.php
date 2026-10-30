@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Extractor;
 
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;

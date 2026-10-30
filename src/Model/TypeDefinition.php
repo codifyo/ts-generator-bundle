@@ -1,19 +1,21 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Model;
 
-class TypeDefinition
+final class TypeDefinition
 {
     /**
-     * @param PropertyDefinition[] $properties
-     * @param array<string, string> $imports Map of importAlias => targetClassName/FileName
+     * @param PropertyDefinition[]  $properties
+     * @param array<string, string> $imports    Map of importAlias => targetClassName/FileName
      */
     public function __construct(
         private string $name,
         private string $className,
         private array $properties = [],
         private array $imports = [],
-        private string $kind = 'interface'
+        private string $kind = 'interface',
     ) {
     }
 

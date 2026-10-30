@@ -1,11 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Tests\Command;
 
 use Codifyo\TsGeneratorBundle\Command\GenerateTypeScriptCommand;
 use Codifyo\TsGeneratorBundle\Generator\TypeScriptGeneratorInterface;
 use PHPUnit\Framework\TestCase;
-use Symfony\Component\Console\Application;
+use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 class GenerateTypeScriptCommandTest extends TestCase
@@ -23,17 +25,35 @@ class GenerateTypeScriptCommandTest extends TestCase
             ]);
 
         $command = new GenerateTypeScriptCommand($generatorMock);
-        $application = new Application();
-        $application->add($command);
+        $this->assertSame('codifyo:ts-generator:generate', $command->getName());
 
-        $commandTester = new CommandTester($application->find('codifyo:ts-generator:generate'));
+        $commandTester = new CommandTester($command);
         $statusCode = $commandTester->execute([
             '--project' => 'projet1',
         ]);
 
-        $this->assertEquals(0, $statusCode);
+        $this->assertEquals(Command::SUCCESS, $statusCode);
         $output = $commandTester->getDisplay();
         $this->assertStringContainsString('Codifyo TypeScript Generator', $output);
         $this->assertStringContainsString('Successfully generated 1 TypeScript definition file(s).', $output);
+    }
+
+    public function testErrorsAreReportedAsFailure(): void
+    {
+        $generatorMock = $this->createMock(TypeScriptGeneratorInterface::class);
+        $generatorMock->method('generate')->willThrowException(new \TypeError('boom'));
+
+        $commandTester = new CommandTester(new GenerateTypeScriptCommand($generatorMock));
+        $statusCode = $commandTester->execute([]);
+
+        $this->assertEquals(Command::FAILURE, $statusCode);
+        $this->assertStringContainsString('boom', $commandTester->getDisplay());
+    }
+
+    public function testProjectOptionRequiresAValue(): void
+    {
+        $command = new GenerateTypeScriptCommand($this->createMock(TypeScriptGeneratorInterface::class));
+
+        $this->assertTrue($command->getDefinition()->getOption('project')->isValueRequired());
     }
 }

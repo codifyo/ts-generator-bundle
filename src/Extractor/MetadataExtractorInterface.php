@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Codifyo\TsGeneratorBundle\Extractor;
 
 use Codifyo\TsGeneratorBundle\Model\TypeConfig;
