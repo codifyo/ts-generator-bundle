@@ -22,7 +22,7 @@ Le front consomme ainsi des types toujours alignés sur l'API, sans les écrire 
 ## Compatibilité
 
 - **PHP** : 8.2 et supérieur (8.4+ pour Symfony 8).
-- **Symfony** : 7.3, 7.4 et 8.x.
+- **Symfony** : 7.4 (LTS) et 8.1+, les branches encore maintenues.
 - **Optionnel** : `doctrine/orm` (relations), `jms/serializer-bundle` (mode `jms`), `phpstan/phpdoc-parser` (génériques PHPDoc résolus par PropertyInfo).
 
 ## Installation
@@ -136,7 +136,7 @@ composer phpstan  # analyse statique (niveau 6)
 composer cs       # vérification du style (PHP-CS-Fixer) ; composer cs-fix pour corriger
 ```
 
-La CI GitHub Actions exécute ces vérifications sur Symfony 7.3 (dépendances minimales), 7.4, 8.0 et 8.x.
+La CI GitHub Actions exécute ces vérifications sur Symfony 7.4 (dépendances minimales et maximales), 8.1 et 8.x.
 
 ## Licence
 

@@ -13,12 +13,12 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-                    - { php: '8.2', symfony: '7.3.*', deps: 'lowest' }
+                    - { php: '8.2', symfony: '7.4.*', deps: 'lowest' }
                     - { php: '8.3', symfony: '7.4.*', deps: 'highest' }
-                    - { php: '8.4', symfony: '8.0.*', deps: 'highest' }
+                    - { php: '8.4', symfony: '8.1.*', deps: 'highest' }
                     - { php: '8.5', symfony: '8.*', deps: 'highest' }
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - uses: shivammathur/setup-php@v2
               with:
@@ -38,7 +38,7 @@ jobs:
         name: PHPStan & coding standards
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - uses: shivammathur/setup-php@v2
               with:
