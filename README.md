@@ -14,6 +14,7 @@ Le front consomme ainsi des types toujours alignés sur l'API, sans les écrire 
 - **Plusieurs projets** : chaque projet a son dossier de sortie (`assets/ts/types`, `public/ts/types`…) et sa liste de types.
 - **`interface`, `class` ou `type`** au choix, par type (option `kind`).
 - **Quatre modes d'extraction** : `runtime` (vrai `normalize()`, custom normalizers compris), `static` (métadonnées, sans exécuter de code), `jms` et `auto`. Voir [Modes d'extraction](docs/extraction-modes.md).
+- **Objet réel en exemple** : avec `sample_id`, le mode `runtime` normalise une vraie entité plutôt qu'un objet vide, et déduit des valeurs le type des champs non typés (custom normalizers, getters sans type). Voir [Normaliser un objet réel](docs/extraction-modes.md#normaliser-un-objet-réel).
 - **Typage riche** : génériques PHPDoc (`Collection<int, Tag>`, `array<Tag>`, `Tag[]`), array shapes, alias `@phpstan-type`, enums, dates, unions. Voir [Correspondance des types](docs/type-mapping.md).
 - **Relations Doctrine** : `OneToMany` / `ManyToMany` en `Array<Target>`, `ManyToOne` / `OneToOne` nullables selon le `JoinColumn`.
 - **Références entre types** : imports relatifs, génération automatique des dépendances (`auto_generate_deps`) ou description inline récursive. Voir [Références et imports](docs/references-and-imports.md).

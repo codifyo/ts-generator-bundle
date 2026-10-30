@@ -62,6 +62,14 @@ final class Configuration implements ConfigurationInterface
                                         ->enumNode('kind')->values(['interface', 'class', 'type'])->defaultValue('interface')->end()
                                         ->enumNode('mode')->values(['auto', 'runtime', 'static', 'jms'])->defaultNull()->end()
                                         ->booleanNode('auto_generate_deps')->defaultFalse()->end()
+                                        ->variableNode('sample_id')
+                                            ->info('Identifier of a real object to normalize in runtime mode (scalar, or map for composite keys)')
+                                            ->defaultNull()
+                                            ->validate()
+                                                ->ifTrue(static fn (mixed $v): bool => !self::isValidSampleId($v))
+                                                ->thenInvalid('"sample_id" must be an integer, a string or a map of field => integer|string (composite key), %s given.')
+                                            ->end()
+                                        ->end()
                                         ->arrayNode('groups')
                                             ->prototype('scalar')->end()
                                             ->defaultValue([])
@@ -75,5 +83,24 @@ final class Configuration implements ConfigurationInterface
             ->end();
 
         return $treeBuilder;
+    }
+
+    private static function isValidSampleId(mixed $value): bool
+    {
+        if ($value === null || \is_int($value) || (\is_string($value) && $value !== '')) {
+            return true;
+        }
+
+        if (!\is_array($value) || $value === [] || array_is_list($value)) {
+            return false;
+        }
+
+        foreach ($value as $field) {
+            if (!\is_int($field) && !\is_string($field)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

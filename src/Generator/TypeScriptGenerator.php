@@ -71,14 +71,21 @@ final class TypeScriptGenerator implements TypeScriptGeneratorInterface
                 }
 
                 // The project mode is resolved here so that extractors only depend on TypeConfig
-                $types[] = new TypeConfig(
+                $typeConfig = new TypeConfig(
                     $class,
                     $typeData['groups'] ?? [],
                     $typeData['name'] ?? null,
                     $typeData['kind'] ?? 'interface',
                     (bool) ($typeData['auto_generate_deps'] ?? false),
-                    $typeData['mode'] ?? $projectMode
+                    $typeData['mode'] ?? $projectMode,
+                    $typeData['sample_id'] ?? null
                 );
+
+                if ($typeConfig->getSampleId() !== null && \in_array($typeConfig->getMode(), ['static', 'jms'], true)) {
+                    throw new \InvalidArgumentException(\sprintf('Type "%s" defines a "sample_id" but uses the "%s" mode: samples are only normalized in "runtime" or "auto" mode.', $class, $typeConfig->getMode()));
+                }
+
+                $types[] = $typeConfig;
             }
 
             $parsed[$name] = new ProjectConfig((string) $name, $data['dir'] ?? 'public/ts/types', $types, $projectMode);

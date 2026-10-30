@@ -60,6 +60,7 @@ codifyo_ts_generator:
 | `kind` | `interface` \| `class` \| `type` | `interface` | Forme générée : `export interface X {…}`, `export class X {…}` ou `export type X = {…};`. |
 | `mode` | `auto` \| `runtime` \| `static` \| `jms` | mode du projet | Surcharge le mode du projet pour ce type. |
 | `auto_generate_deps` | `bool` | `false` | Génère aussi un fichier pour chaque classe référencée, récursivement. Sinon, les classes référencées sont décrites inline. Voir [Références et imports](references-and-imports.md). |
+| `sample_id` | `int` \| `string` \| map | `null` | Identifiant d'un objet réel normalisé à la place d'une instance vide (modes `runtime` et `auto`). Une map décrit une clé composite. Voir [Normaliser un objet réel](extraction-modes.md#normaliser-un-objet-réel). |
 
 > [!TIP]
 > **`kind: class`**

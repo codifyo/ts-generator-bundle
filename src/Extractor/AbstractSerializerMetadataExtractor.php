@@ -7,6 +7,7 @@ namespace Codifyo\TsGeneratorBundle\Extractor;
 use Codifyo\TsGeneratorBundle\Converter\TypeConverterInterface;
 use Codifyo\TsGeneratorBundle\Helper\ClassResolver;
 use Codifyo\TsGeneratorBundle\Helper\TypeReferenceCollector;
+use Codifyo\TsGeneratorBundle\Helper\ValueTypeInferrer;
 use Codifyo\TsGeneratorBundle\Model\PropertyDefinition;
 use Codifyo\TsGeneratorBundle\Model\TypeDefinition;
 use Symfony\Component\PropertyInfo\PropertyInfoExtractorInterface;
@@ -88,14 +89,9 @@ abstract class AbstractSerializerMetadataExtractor implements MetadataExtractorI
             }
         }
 
-        if ($acc->types === [] && $runtimeValue !== null) {
-            $acc->types[] = match (true) {
-                \is_int($runtimeValue), \is_float($runtimeValue) => 'number',
-                \is_string($runtimeValue) => 'string',
-                \is_bool($runtimeValue) => 'boolean',
-                \is_array($runtimeValue) => array_is_list($runtimeValue) ? 'any[]' : 'Record<string, any>',
-                default => 'any',
-            };
+        // Last resort: the normalized value (precise when it comes from a real sample)
+        if (!$this->hasSpecificType($acc) && $runtimeValue !== null) {
+            $acc->types[] = ValueTypeInferrer::infer($runtimeValue);
         }
 
         $typeDefinition->addProperty(new PropertyDefinition($serializedName, $this->finalizeTsType($acc), $acc->nullable, $acc->references));

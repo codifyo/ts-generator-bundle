@@ -53,3 +53,12 @@ JMSSerializerBundle n'est pas installé ou pas activé : le service `jms_seriali
 ## Un ancien fichier `.ts` est toujours là
 
 Le bundle réécrit les fichiers des types configurés mais ne supprime jamais rien. Supprimez les fichiers des types retirés de la configuration, ou videz le dossier avant la génération.
+
+## `Sample … not found, using a blank instance`
+
+L'objet désigné par `sample_id` n'existe pas dans la base utilisée par la commande (base vide en CI, ligne supprimée). La génération continue avec une instance vide : les champs que seules les valeurs décrivaient redeviennent `any`. Chargez des fixtures avant de générer, ou choisissez un identifiant stable.
+
+## `defines a "sample_id" but …`
+
+- **`but uses the "static" mode`** : `sample_id` n'a d'effet qu'en mode `runtime` ou `auto`. Retirez l'option ou changez le mode du type.
+- **`requires DoctrineBundle` / `is not managed by Doctrine`** : le chargement par défaut passe par Doctrine. Pour un objet non Doctrine (DTO), fournissez votre propre `SampleObjectProviderInterface` (voir [Charger les objets autrement](extraction-modes.md#charger-les-objets-autrement)).

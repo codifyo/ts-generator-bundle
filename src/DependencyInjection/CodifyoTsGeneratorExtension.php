@@ -13,6 +13,8 @@ use Codifyo\TsGeneratorBundle\Extractor\SymfonySerializerMetadataExtractor;
 use Codifyo\TsGeneratorBundle\Extractor\SymfonySerializerRuntimeExtractor;
 use Codifyo\TsGeneratorBundle\Generator\TypeScriptGenerator;
 use Codifyo\TsGeneratorBundle\Generator\TypeScriptGeneratorInterface;
+use Codifyo\TsGeneratorBundle\Sample\DoctrineSampleObjectProvider;
+use Codifyo\TsGeneratorBundle\Sample\SampleObjectProviderInterface;
 use Codifyo\TsGeneratorBundle\Writer\FileWriter;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -41,12 +43,19 @@ final class CodifyoTsGeneratorExtension extends Extension
             new Reference(TypeConverterInterface::class),
         ]));
 
+        // Loads the objects configured with "sample_id"; alias the interface to another service to load them elsewhere
+        $container->setDefinition(DoctrineSampleObjectProvider::class, new Definition(DoctrineSampleObjectProvider::class, [
+            $optional('doctrine'),
+        ]));
+        $container->setAlias(SampleObjectProviderInterface::class, DoctrineSampleObjectProvider::class);
+
         $container->setDefinition(SymfonySerializerRuntimeExtractor::class, new Definition(SymfonySerializerRuntimeExtractor::class, [
             $optional('serializer'),
             $optional('property_info'),
             new Reference(TypeConverterInterface::class),
             $optional('serializer.mapping.class_metadata_factory'),
             $optional('logger'),
+            new Reference(SampleObjectProviderInterface::class),
         ]));
 
         $container->setDefinition(JmsSerializerMetadataExtractor::class, new Definition(JmsSerializerMetadataExtractor::class, [
