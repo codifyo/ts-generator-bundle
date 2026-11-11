@@ -21,6 +21,11 @@ class DummyDoctrineComment
     private ?DummyArticle $article = null;
 
     #[Groups(['serializer_group'])]
+    #[ORM\ManyToOne(targetEntity: DummyUser::class)]
+    #[ORM\JoinColumn(name: 'editor_id')]
+    private ?DummyUser $editor = null;
+
+    #[Groups(['serializer_group'])]
     #[ORM\OneToOne]
     private DummyRole $role;
 

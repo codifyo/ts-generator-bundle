@@ -9,6 +9,8 @@ use Symfony\Component\Serializer\Attribute\Groups;
 
 /**
  * @phpstan-type ClassB array{id: int, name: string, active?: bool}
+ *
+ * @psalm-type ClassC array{code: string}
  */
 class DummyClassWithPhpstanAlias
 {
@@ -34,5 +36,16 @@ class DummyClassWithPhpstanAlias
         return [
             ['id' => 1, 'name' => 'Item 1', 'active' => true],
         ];
+    }
+
+    /**
+     * Custom getter returning array<ClassC>, ClassC being a Psalm alias.
+     *
+     * @return array<ClassC>
+     */
+    #[Groups(['serializer_group'])]
+    public function getCodes(): array
+    {
+        return [];
     }
 }

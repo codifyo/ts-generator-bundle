@@ -34,18 +34,12 @@ class SymfonySerializerRuntimeExtractorTest extends TestCase
         $definition = $extractor->extract($typeConfig);
 
         $this->assertEquals('DummyUserWithCustomGetter', $definition->getName());
-        $props = $definition->getProperties();
-
-        $propNames = array_map(static fn ($p) => $p->getName(), $props);
-        $this->assertContains('id', $propNames);
-        $this->assertContains('firstName', $propNames);
-        $this->assertContains('lastName', $propNames);
-        $this->assertContains('fullName', $propNames);
-
-        foreach ($props as $p) {
-            if ($p->getName() === 'fullName') {
-                $this->assertEquals('string', $p->getTsType());
-            }
+        $types = [];
+        foreach ($definition->getProperties() as $property) {
+            $types[$property->getName()] = $property->getTsType();
         }
+
+        // "fullName" exists only as a getter carrying #[Groups]
+        $this->assertSame(['id' => 'number', 'firstName' => 'string', 'lastName' => 'string', 'fullName' => 'string'], $types);
     }
 }

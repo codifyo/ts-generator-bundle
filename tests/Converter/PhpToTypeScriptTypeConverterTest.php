@@ -78,4 +78,32 @@ class PhpToTypeScriptTypeConverterTest extends TestCase
             $this->converter->convertType(Type::collection(Type::object(\ArrayIterator::class), Type::object('App\Entity\Role'), Type::int()))
         );
     }
+
+    public function testConvertTypeInfoEdgeTypes(): void
+    {
+        $this->assertSame('Countable & Stringable', $this->converter->convertType(Type::intersection(Type::object(\Countable::class), Type::object(\Stringable::class))));
+        $this->assertSame('Record<string, any>', $this->converter->convertType(Type::object()));
+        $this->assertSame('any[]', $this->converter->convertType(Type::object(\ArrayIterator::class)));
+        $this->assertSame('any[]', $this->converter->convertType(Type::list()));
+        $this->assertSame('Record<string, any>', $this->converter->convertType(Type::arrayShape([])));
+        $this->assertSame('number', $this->converter->convertType(Type::template('T', Type::int())));
+        $this->assertSame('boolean', $this->converter->convertType(Type::true()));
+        $this->assertSame('any', $this->converter->convertType(Type::mixed()));
+        $this->assertSame('void', $this->converter->convertType(Type::void()));
+        $this->assertSame('null', $this->converter->convertType(Type::null()));
+        $this->assertSame('any', $this->converter->convertType(null));
+    }
+
+    public function testConvertStringEdgeTypes(): void
+    {
+        $this->assertSame('Record<string, any>', $this->converter->convertType('object'));
+        $this->assertSame('any', $this->converter->convertType('mixed'));
+        $this->assertSame('never', $this->converter->convertType('never'));
+        $this->assertSame('null', $this->converter->convertType('null'));
+        $this->assertSame('Array<Tag>', $this->converter->convertType('App\Tag[]'));
+        $this->assertSame('Array<Tag>', $this->converter->convertType('Collection<App\Tag>'));
+        $this->assertSame('Record<string, any>', $this->converter->convertType('array{}'));
+        $this->assertSame('{ id: number }', $this->converter->convertType('array{id: int, ...}'));
+        $this->assertSame('{ id: number }', $this->converter->convertType('\array{id: int}'));
+    }
 }

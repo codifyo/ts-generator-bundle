@@ -80,7 +80,6 @@ class CodifyoTsGeneratorExtensionTest extends TestCase
 
         $this->assertInstanceOf(TypeScriptGeneratorInterface::class, $container->get(TypeScriptGeneratorInterface::class));
         $this->assertTrue($container->get('console.command_loader')->has('codifyo:ts-generator:generate'));
-        $this->assertSame(sys_get_temp_dir(), $container->getParameter('kernel.project_dir'));
     }
 
     public function testDoctrineSampleProviderReceivesTheDoctrineRegistry(): void

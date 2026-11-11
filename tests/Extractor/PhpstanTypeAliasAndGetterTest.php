@@ -48,5 +48,8 @@ class PhpstanTypeAliasAndGetterTest extends TestCase
 
         // Case 2: array<ClassB> where ClassB is array{id: int, name: string, active?: bool}
         $this->assertEquals('Array<{ id: number; name: string; active?: boolean }>', $propMap['customItems']->getTsType());
+
+        // Case 3: Psalm aliases are honored like PHPStan ones
+        $this->assertEquals('Array<{ code: string }>', $propMap['codes']->getTsType());
     }
 }

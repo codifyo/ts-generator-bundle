@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Codifyo\TsGeneratorBundle\Tests\Extractor;
 
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
+use Codifyo\TsGeneratorBundle\Extractor\JmsSerializerMetadataExtractor;
+use Codifyo\TsGeneratorBundle\Extractor\MetadataExtractorInterface;
 use Codifyo\TsGeneratorBundle\Extractor\SymfonySerializerMetadataExtractor;
 use Codifyo\TsGeneratorBundle\Extractor\SymfonySerializerRuntimeExtractor;
 use Codifyo\TsGeneratorBundle\Model\PropertyDefinition;
@@ -12,13 +14,16 @@ use Codifyo\TsGeneratorBundle\Model\TypeConfig;
 use Codifyo\TsGeneratorBundle\Model\TypeDefinition;
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyArticle;
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyDoctrineComment;
+use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyProfile;
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyRole;
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyTag;
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyUser;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
 use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactory;
 use Symfony\Component\Serializer\Mapping\Loader\AttributeLoader;
+use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
 use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
 use Symfony\Component\Serializer\Serializer;
@@ -82,11 +87,50 @@ class GroupsAndDoctrineTest extends TestCase
         $this->assertStringContainsString('database unavailable', $logger->messages[0]);
     }
 
-    public function testMissingClassIsReportedByEveryExtractor(): void
+    /**
+     * @return iterable<string, array{MetadataExtractorInterface}>
+     */
+    public static function provideExtractors(): iterable
+    {
+        $converter = new PhpToTypeScriptTypeConverter();
+        yield 'static' => [new SymfonySerializerMetadataExtractor(new ClassMetadataFactory(new AttributeLoader()), null, $converter)];
+        yield 'runtime' => [new SymfonySerializerRuntimeExtractor(null, null, $converter)];
+        yield 'jms' => [new JmsSerializerMetadataExtractor(null, $converter)];
+    }
+
+    #[DataProvider('provideExtractors')]
+    public function testMissingClassIsReportedByEveryExtractor(MetadataExtractorInterface $extractor): void
     {
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Class "App\DoesNotExist" does not exist.');
 
-        (new SymfonySerializerRuntimeExtractor(null, null, new PhpToTypeScriptTypeConverter()))->extract(new TypeConfig('App\DoesNotExist'));
+        $extractor->extract(new TypeConfig('App\DoesNotExist'));
+    }
+
+    public function testSnakeCaseNamesAreMappedBackToCamelCaseProperties(): void
+    {
+        $factory = new ClassMetadataFactory(new AttributeLoader());
+        $normalizer = new ObjectNormalizer($factory, new CamelCaseToSnakeCaseNameConverter());
+        $extractor = new SymfonySerializerRuntimeExtractor(new Serializer([$normalizer]), null, new PhpToTypeScriptTypeConverter(), $factory);
+
+        $props = $this->propertiesByName($extractor->extract(new TypeConfig(DummyProfile::class, ['profile'])));
+
+        // "main_tag" has no getter: only the "mainTag" property tells its type
+        $this->assertSame('DummyTag', $props['main_tag']->getTsType());
+        $this->assertTrue($props['main_tag']->isNullable());
+        $this->assertSame(DummyTag::class, $props['main_tag']->getReferencedClass());
+    }
+
+    public function testUntypedPropertiesAreDescribedByTheirIsHasCanAccessor(): void
+    {
+        $extractor = new SymfonySerializerMetadataExtractor(new ClassMetadataFactory(new AttributeLoader()), null, new PhpToTypeScriptTypeConverter());
+
+        $types = array_map(
+            static fn (PropertyDefinition $p): string => $p->getTsType(),
+            $this->propertiesByName($extractor->extract(new TypeConfig(DummyProfile::class, ['profile'])))
+        );
+
+        $this->assertSame(['mainTag' => 'DummyTag', 'active' => 'boolean', 'children' => 'boolean', 'edit' => 'boolean'], $types);
     }
 
     public function testDoctrineRelationsTypesAndNullability(): void
@@ -102,6 +146,10 @@ class GroupsAndDoctrineTest extends TestCase
         // JoinColumn(nullable: false)
         $this->assertSame('DummyArticle', $props['article']->getTsType());
         $this->assertFalse($props['article']->isNullable());
+
+        // JoinColumn without "nullable": Doctrine's default (nullable) applies
+        $this->assertSame('DummyUser', $props['editor']->getTsType());
+        $this->assertTrue($props['editor']->isNullable());
 
         // OneToOne without targetEntity: inferred from the non-nullable native type
         $this->assertSame('DummyRole', $props['role']->getTsType());

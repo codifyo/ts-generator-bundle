@@ -7,6 +7,7 @@ namespace Codifyo\TsGeneratorBundle\Tests\Extractor;
 use Codifyo\TsGeneratorBundle\Converter\PhpToTypeScriptTypeConverter;
 use Codifyo\TsGeneratorBundle\Extractor\SymfonySerializerMetadataExtractor;
 use Codifyo\TsGeneratorBundle\Model\TypeConfig;
+use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyRole;
 use Codifyo\TsGeneratorBundle\Tests\Fixtures\DummyUser;
 use PHPUnit\Framework\TestCase;
 
@@ -23,13 +24,18 @@ class SymfonySerializerMetadataExtractorTest extends TestCase
         $this->assertEquals('DummyUser', $definition->getName());
         $this->assertEquals(DummyUser::class, $definition->getClassName());
 
-        $props = $definition->getProperties();
-        $this->assertCount(4, $props);
+        // Without serializer metadata there are no groups: every property, typed from reflection
+        $described = [];
+        foreach ($definition->getProperties() as $property) {
+            $described[$property->getName()] = [$property->getTsType(), $property->isNullable()];
+        }
 
-        $propNames = array_map(static fn ($p) => $p->getName(), $props);
-        $this->assertContains('id', $propNames);
-        $this->assertContains('username', $propNames);
-        $this->assertContains('email', $propNames);
-        $this->assertContains('role', $propNames);
+        $this->assertSame([
+            'id' => ['number', false],
+            'username' => ['string', false],
+            'email' => ['string', true],
+            'role' => ['DummyRole', true],
+        ], $described);
+        $this->assertSame(['DummyRole' => DummyRole::class], $definition->getImports());
     }
 }
