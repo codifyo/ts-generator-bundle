@@ -151,16 +151,107 @@ class TypeScriptGeneratorTest extends TestCase
         ]);
     }
 
-    public function testFirstDeclarationOfAClassWins(): void
+    public function testSameClassDeclaredWithDifferentGroupsGeneratesOneFilePerDeclaration(): void
+    {
+        $extractor = $this->fakeExtractor([
+            DummyTag::class => static fn (TypeConfig $config): array => [new PropertyDefinition(implode('_', $config->getGroups()), 'number')],
+        ]);
+
+        $files = $this->generate($extractor, [
+            ['class' => DummyTag::class, 'groups' => ['tag_list'], 'name' => 'TagList'],
+            ['class' => DummyTag::class, 'groups' => ['tag_detail'], 'name' => 'TagDetail'],
+        ]);
+
+        $this->assertCount(2, $files);
+        $this->assertStringContainsString('tag_list: number', $this->read('TagList'));
+        $this->assertStringContainsString('tag_detail: number', $this->read('TagDetail'));
+    }
+
+    public function testSameClassTwiceWithoutDistinctNamesIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('both generate the TypeScript type "DummyTag"');
+
+        $this->generate($this->fakeExtractor(), [
+            ['class' => DummyTag::class, 'groups' => ['a']],
+            ['class' => DummyTag::class, 'groups' => ['b']],
+        ]);
+    }
+
+    public function testIdenticalDeclarationsAreIgnored(): void
     {
         $files = $this->generate($this->fakeExtractor(), [
-            ['class' => DummyTag::class, 'name' => 'First'],
-            ['class' => DummyTag::class, 'name' => 'Second'],
+            ['class' => DummyTag::class, 'groups' => ['a', 'b']],
+            ['class' => DummyTag::class, 'groups' => ['b', 'a']],
         ]);
 
         $this->assertCount(1, $files);
-        $this->assertFileExists($this->tempDir . '/First.ts');
-        $this->assertFileDoesNotExist($this->tempDir . '/Second.ts');
+    }
+
+    public function testReferenceTargetsTheDeclarationMatchingTheGroupsOfTheParent(): void
+    {
+        $extractor = $this->fakeExtractor([
+            DummyUser::class => static fn (): array => [new PropertyDefinition('role', 'DummyRole', false, DummyRole::class)],
+        ]);
+
+        $this->generate($extractor, [
+            ['class' => DummyUser::class, 'groups' => ['detail']],
+            ['class' => DummyRole::class, 'groups' => ['list'], 'name' => 'RoleList'],
+            ['class' => DummyRole::class, 'groups' => ['detail'], 'name' => 'RoleDetail'],
+        ]);
+
+        $content = $this->read('DummyUser');
+        $this->assertStringContainsString("import { RoleDetail } from './RoleDetail';", $content);
+        $this->assertStringContainsString('role: RoleDetail;', $content);
+        $this->assertStringNotContainsString('RoleList', $content);
+    }
+
+    public function testReferenceToAClassDeclaredOnceKeepsPointingToItWhateverTheGroups(): void
+    {
+        $extractor = $this->fakeExtractor([
+            DummyUser::class => static fn (): array => [new PropertyDefinition('role', 'DummyRole', false, DummyRole::class)],
+        ]);
+
+        $this->generate($extractor, [
+            ['class' => DummyUser::class, 'groups' => ['detail']],
+            ['class' => DummyRole::class, 'groups' => ['list']],
+        ]);
+
+        $this->assertStringContainsString('role: DummyRole;', $this->read('DummyUser'));
+    }
+
+    public function testReferenceFallsBackToInlineWhenNoDeclarationMatchesTheParentGroups(): void
+    {
+        $extractor = $this->fakeExtractor([
+            DummyUser::class => static fn (): array => [new PropertyDefinition('role', 'DummyRole', false, DummyRole::class)],
+            DummyRole::class => static fn (TypeConfig $config): array => [new PropertyDefinition(implode('_', $config->getGroups()), 'number')],
+        ]);
+
+        $this->generate($extractor, [
+            ['class' => DummyUser::class, 'groups' => ['other']],
+            ['class' => DummyRole::class, 'groups' => ['a'], 'name' => 'RoleA'],
+            ['class' => DummyRole::class, 'groups' => ['b'], 'name' => 'RoleB'],
+        ]);
+
+        $this->assertStringContainsString('role: { other: number };', $this->read('DummyUser'));
+    }
+
+    public function testSharedDependencyDiscoveredWithDifferentGroupsGivesDistinctTypes(): void
+    {
+        $extractor = $this->fakeExtractor([
+            DummyTag::class => static fn (): array => [new PropertyDefinition('role', 'DummyRole', false, DummyRole::class)],
+            DummyUser::class => static fn (): array => [new PropertyDefinition('role', 'DummyRole', false, DummyRole::class)],
+        ]);
+
+        $files = $this->generate($extractor, [
+            ['class' => DummyTag::class, 'groups' => ['public'], 'auto_generate_deps' => true],
+            ['class' => DummyUser::class, 'groups' => ['user:admin'], 'auto_generate_deps' => true],
+        ]);
+
+        $this->assertCount(4, $files);
+        $this->assertStringContainsString('role: DummyRole;', $this->read('DummyTag'));
+        $this->assertStringContainsString('role: DummyRoleUserAdmin;', $this->read('DummyUser'));
+        $this->assertFileExists($this->tempDir . '/DummyRoleUserAdmin.ts');
     }
 
     public function testInlinedClassesAreDescribedWithTheGroupsOfEachParent(): void

@@ -88,7 +88,7 @@ Pour éviter une description infinie, une classe déjà en cours de description 
 
 ## Noms personnalisés et collisions
 
-Le nom TypeScript d'un type est son option `name` ou, à défaut, le nom court de la classe. Deux classes ne peuvent pas produire le même nom dans un projet, car elles écriraient le même fichier. La comparaison ignore la casse, pour les systèmes de fichiers qui ne la distinguent pas.
+Le nom TypeScript d'un type est son option `name` ou, à défaut, le nom court de la classe. Deux déclarations ne peuvent pas produire le même nom dans un projet, car elles écriraient le même fichier. La comparaison ignore la casse, pour les systèmes de fichiers qui ne la distinguent pas.
 
 ```
 Classes "App\Entity\Tag" and "App\Blog\Tag" both generate the TypeScript type "Tag".
@@ -105,3 +105,27 @@ types:
 ```
 
 Le nom doit être un identifiant TypeScript valide. Un nom comme `my-type` ou `../types/User` est refusé avant toute écriture de fichier.
+
+## Une même classe sous plusieurs jeux de groupes
+
+Une classe peut être déclarée plusieurs fois dans un projet, avec des `groups` différents : chaque déclaration produit son propre fichier. Donnez-leur des `name` distincts, sinon la collision de noms ci-dessus est signalée.
+
+```yaml
+types:
+    - class: 'App\Entity\User'
+      groups: ['user:list']
+      name: 'UserList'
+    - class: 'App\Entity\User'
+      groups: ['user:detail']
+      name: 'UserDetail'
+```
+
+Une propriété qui référence une classe déclarée plusieurs fois pointe vers :
+
+1. la déclaration dont les groupes sont les mêmes que ceux du type parent (l'ordre des groupes est sans importance) ;
+2. sinon, la déclaration unique de la classe si elle n'en a qu'une (quels que soient ses groupes) ;
+3. sinon, une description inline avec les groupes du parent.
+
+Avec `auto_generate_deps`, une dépendance partagée par deux types de groupes différents donne deux types : le premier découvert garde le nom court de la classe, le suivant reçoit un suffixe tiré de ses groupes (`user:admin` → `RoleUserAdmin`). Pour choisir les noms, déclarez la dépendance explicitement. Deux déclarations identiques (mêmes classe, groupes et nom) sont fusionnées.
+
+Si le suffixe dérivé est vide (groupes vides) ou identique à celui d'un autre type (`user:admin` et `user_admin`), la collision de noms est signalée : déclarez alors la dépendance explicitement avec un `name`.
